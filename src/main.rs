@@ -9,8 +9,12 @@ use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use nix::{
     sched::{clone, CloneFlags},
-    sys::socket::{socketpair, AddressFamily, SockFlag, SockType},
-    unistd::Pid,
+    sys::{
+        signal::Signal,
+        socket::{socketpair, AddressFamily, SockFlag, SockType},
+        wait::waitpid,
+    },
+    unistd::{execve, Pid},
 };
 use std::process::exit;
 
@@ -53,6 +57,8 @@ const STACK_SIZE: usize = 1024 * 1024;
 // Creates a child process with clone and runs the executable file
 // with execve in the child process.
 fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
+    println!("creating child process");
+
     let mut flags = CloneFlags::empty();
     flags.insert(CloneFlags::CLONE_NEWNS);
     flags.insert(CloneFlags::CLONE_NEWCGROUP);
@@ -69,7 +75,9 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
             }),
             &mut stack,
             flags,
-            None,
+            Some(Signal::SIGCHLD as i32),
+            // If the signal SIGCHLD is ignored, waitpid will hang until the
+            // child exits and then fail with code ECHILD.
         )
     };
 
@@ -85,31 +93,37 @@ fn child(config: &ChildConfig) -> ContainerResult {
     user_ns(config)?;
     capabilities()?;
     syscalls()?;
-    todo!()
+    match execve::<CString, CString>(&config.exec_path, &config.args, &[]) {
+        Ok(_) => Ok(()),
+        Err(_) => {
+            println!("Error!");
+            Err(ContainerError::ExecveErr)
+        }
+    }
 }
 
 fn set_hostname() -> ContainerResult {
-    todo!()
+    Ok(())
 }
 
 fn mounts(config: &ChildConfig) -> ContainerResult {
-    todo!()
+    Ok(())
 }
 
 fn user_ns(config: &ChildConfig) -> ContainerResult {
-    todo!()
+    Ok(())
 }
 
 fn capabilities() -> ContainerResult {
-    todo!()
+    Ok(())
 }
 
 fn syscalls() -> ContainerResult {
-    todo!()
+    Ok(())
 }
 
 fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
-    todo!()
+    Ok(())
 }
 
 fn resources(config: &ChildConfig) {}
@@ -147,8 +161,12 @@ fn run() -> ContainerResult {
     println!("Config: {:?}", config);
 
     resources(&config);
-    let pid = create_child_process(&config)?;
-    handle_child_uid_map(pid, parent_socket)?;
+    let child_pid = create_child_process(&config)?;
+    handle_child_uid_map(child_pid, parent_socket)?;
+    if let Err(e) = waitpid(child_pid, None) {
+        println!("Error waiting for pid: {:?}", e);
+        return Err(ContainerError::WaitPidErr);
+    };
     Ok(())
 }
 
