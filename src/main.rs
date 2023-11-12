@@ -7,6 +7,8 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
+use libc::TIOCSTI;
+use nix::sys::stat::Mode;
 use nix::{
     sched::{clone, CloneFlags},
     sys::{
@@ -14,9 +16,12 @@ use nix::{
         socket::{socketpair, AddressFamily, SockFlag, SockType},
         wait::waitpid,
     },
-    unistd::{execve, Pid},
+    unistd::{execve, sethostname, Pid},
 };
+
+use rand::{seq::SliceRandom, Rng};
 use std::process::exit;
+use syscallz::{Action, Cmp, Comparator, Context, Syscall};
 
 mod errors;
 
@@ -50,6 +55,7 @@ pub struct ChildConfig {
 
     // File descriptor of the socket
     pub socket_fd: i32,
+    //
 }
 
 const STACK_SIZE: usize = 1024 * 1024;
@@ -102,8 +108,33 @@ fn child(config: &ChildConfig) -> ContainerResult {
     }
 }
 
+const SUITS: [&'static str; 4] = ["spades", "diamond", "heart", "clubs"];
+const CARDS: [&'static str; 13] = [
+    "ace", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "jack", "queen",
+    "king",
+];
+
+fn generate_random_hostname() -> String {
+    let mut rng = rand::thread_rng();
+    let suit = SUITS.choose(&mut rng).unwrap();
+    let card = CARDS.choose(&mut rng).unwrap();
+    let random_int: i32 = rng.gen();
+
+    format!("{}-{}-{}", suit, card, random_int)
+}
+
 fn set_hostname() -> ContainerResult {
-    Ok(())
+    let hostname = generate_random_hostname();
+    match sethostname(&hostname) {
+        Ok(_) => {
+            println!("Set hostname to: {:?}", hostname);
+            Ok(())
+        }
+        Err(err) => {
+            println!("Error setting hostname: {:?}", err);
+            Err(ContainerError::CreateSocketErr)
+        }
+    }
 }
 
 fn mounts(config: &ChildConfig) -> ContainerResult {
@@ -119,6 +150,66 @@ fn capabilities() -> ContainerResult {
 }
 
 fn syscalls() -> ContainerResult {
+    println!("Disabling syscalls!");
+
+    let disabled_syscalls = [
+        Syscall::keyctl,
+        Syscall::add_key,
+        Syscall::request_key,
+        Syscall::ptrace,
+        Syscall::mbind,
+        Syscall::migrate_pages,
+        Syscall::set_mempolicy,
+        Syscall::userfaultfd,
+        Syscall::perf_event_open,
+    ];
+
+    let s_isuid: u64 = Mode::S_ISUID.bits().into();
+    let s_isgid: u64 = Mode::S_ISGID.bits().into();
+    let clone_newuser = CloneFlags::CLONE_NEWUSER.bits() as u64;
+
+    // Each tuple: (SysCall, argument_idx, value). 0 would be the first argument index.
+    let conditional_syscalls = [
+        (Syscall::fchmod, 1, s_isuid),
+        (Syscall::fchmod, 1, s_isgid),
+        (Syscall::fchmodat, 2, s_isuid),
+        (Syscall::fchmodat, 2, s_isgid),
+        (Syscall::unshare, 0, clone_newuser),
+        (Syscall::clone, 0, clone_newuser),
+        (Syscall::ioctl, 1, TIOCSTI),
+    ];
+    match Context::init_with_action(Action::Allow) {
+        Ok(mut ctx) => {
+            for syscall in disabled_syscalls {
+                if let Err(err) = ctx.set_action_for_syscall(Action::Errno(0), syscall) {
+                    println!("Failed to disable syscall: {:?}. Error: {:?}", syscall, err);
+                    return Err(ContainerError::DisableSyscall);
+                };
+            }
+
+            for (syscall, arg_idx, bit) in conditional_syscalls {
+                if let Err(err) = ctx.set_rule_for_syscall(
+                    Action::Errno(0),
+                    syscall,
+                    &[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
+                ) {
+                    println!("Failed to disable syscall: {:?}. Error: {:?}", syscall, err);
+                    return Err(ContainerError::DisableSyscall);
+                }
+            }
+
+            if let Err(err) = ctx.load() {
+                println!("Failed to load syscall disabling: {:?}", err);
+                return Err(ContainerError::DisableSyscall);
+            };
+        }
+        Err(err) => {
+            println!("Failed to open seccomp context: {:?}", err);
+            return Err(ContainerError::DisableSyscall);
+        }
+    }
+
+    println!("Finished disabling syscalls!");
     Ok(())
 }
 

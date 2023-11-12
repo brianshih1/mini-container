@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.4.7", features = ["derive"] }
 libc = "0.2.149"
-nix = { version = "0.27.1", features = ["sched", "socket"] }
+nix = { version = "0.27.1", features = ["sched", "socket", "hostname", "fs"] }
+rand = "0.8.5"
 syscallz = "0.17.0"

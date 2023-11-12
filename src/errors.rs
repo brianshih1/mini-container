@@ -5,4 +5,5 @@ pub enum ContainerError {
     CloneErr,
     ExecveErr,
     WaitPidErr,
+    DisableSyscall,
 }
