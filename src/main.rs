@@ -1,16 +1,18 @@
 use std::{
     ffi::CString,
+    fs::{create_dir_all, remove_dir},
     os::fd::{AsRawFd, RawFd},
     path::PathBuf,
-    process::Child, fs::{create_dir_all, remove_dir},
+    process::Child,
 };
 
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
 use nix::{
-    mount::{mount, MsFlags, MntFlags, umount2},
-    sys::stat::Mode, unistd::{pivot_root, chdir},
+    mount::{mount, umount2, MntFlags, MsFlags},
+    sys::stat::Mode,
+    unistd::{chdir, pivot_root},
 };
 use nix::{
     sched::{clone, CloneFlags},
@@ -32,6 +34,9 @@ mod errors;
 struct Cli {
     /// Command to execute
     command: String,
+
+    /// Absolute path to new root filesystem
+    root_filesystem_path: String,
 
     /// Optional pid for child process
     #[arg(short, long)]
@@ -58,7 +63,9 @@ pub struct ChildConfig {
 
     // File descriptor of the socket
     pub socket_fd: i32,
+
     // TODO: root filesystem image directory
+    pub root_filesystem_directory: String,
 }
 
 const STACK_SIZE: usize = 1024 * 1024;
@@ -141,27 +148,47 @@ fn set_hostname() -> ContainerResult {
 }
 
 fn isolate_filesystem(config: &ChildConfig) -> ContainerResult {
-    mount_filesystem(None, &PathBuf::from("/"),  vec![MsFlags::MS_REC, MsFlags::MS_PRIVATE])?;
+    println!("isolating filesystem!");
+    mount_filesystem(
+        None,
+        &PathBuf::from("/"),
+        vec![MsFlags::MS_REC, MsFlags::MS_PRIVATE],
+    )?;
     let filesystem_path = PathBuf::from("/home/brianshih/alpine");
-    mount_filesystem(Some(&filesystem_path), &filesystem_path,  vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE])?;
-    
+    mount_filesystem(
+        Some(&filesystem_path),
+        &filesystem_path,
+        vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
+    )?;
+    let root_filesystem_path = &config.root_filesystem_directory;
     let old_root_path = "oldrootfs";
-    let old_root_absolute_path = PathBuf::from(format!("/home/brianshih/alpine/{old_root_path}"));
-    create_dir_all(&old_root_absolute_path).unwrap();
+    let old_root_absolute_path = PathBuf::from(format!("{root_filesystem_path}/{old_root_path}"));
+    if let Err(e) = create_dir_all(&old_root_absolute_path) {
+        println!("Failed to create directory to hold old root: {:?}", e);
+        return Err(ContainerError::CreateDirErr);
+    }
 
-   if let Err(e) =  pivot_root(&filesystem_path, &PathBuf::from(old_root_absolute_path)) {
-    println!("Failed to pivot root: {:?}", e);
-   };
-   if let Err(e) = umount2(&PathBuf::from(format!("/{old_root_path}")), MntFlags::MNT_DETACH)  {
-     println!("Failed to unmount: {:?}", e);
-   }
-   if let Err(e) =  remove_dir(&PathBuf::from(format!("/{old_root_path}"))) {
-    println!("Failed to remove directory: {:?}", e);
-   };
+    if let Err(e) = pivot_root(&filesystem_path, &PathBuf::from(old_root_absolute_path)) {
+        println!("Failed to pivot root: {:?}", e);
+        return Err(ContainerError::PivotRootErr);
+    };
+    if let Err(e) = umount2(
+        &PathBuf::from(format!("/{old_root_path}")),
+        MntFlags::MNT_DETACH,
+    ) {
+        println!("Failed to unmount: {:?}", e);
+        return Err(ContainerError::UmountErr);
+    }
+    if let Err(e) = remove_dir(&PathBuf::from(format!("/{old_root_path}"))) {
+        println!("Failed to remove directory: {:?}", e);
+        return Err(ContainerError::RemoveDirErr);
+    };
 
-  if let Err(e) =  chdir(&PathBuf::from("/")) {
-    println!("Failed to change directory to: /. Error: {:?}", e);
-  };
+    if let Err(e) = chdir(&PathBuf::from("/")) {
+        println!("Failed to change directory to: /. Error: {:?}", e);
+        return Err(ContainerError::ChangeDirErr);
+    };
+    println!("Finished isolating filesystem!");
     Ok(())
 }
 
@@ -184,11 +211,7 @@ fn mount_filesystem(
     ) {
         Ok(_) => Ok(()),
         Err(err) => {
-            println!(
-              "Failed to mount directory. Target directory: {:?}. Filesystem Path: {:?}. Error: {:?}",
-              filesystem_path, 
-              target_directory, err
-            );
+            println!("Failed to mount directory. Error: {:?}", err);
             return Err(ContainerError::MountSysCall);
         }
     }
@@ -301,6 +324,7 @@ fn run() -> ContainerResult {
             .collect(),
         memory: Some(10),
         socket_fd: child_socket,
+        root_filesystem_directory: cli.root_filesystem_path,
     };
     println!("Config: {:?}", config);
 

@@ -7,4 +7,9 @@ pub enum ContainerError {
     WaitPidErr,
     DisableSyscall,
     MountSysCall,
+    PivotRootErr,
+    UmountErr,
+    CreateDirErr,
+    RemoveDirErr,
+    ChangeDirErr,
 }
