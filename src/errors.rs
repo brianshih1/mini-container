@@ -6,4 +6,5 @@ pub enum ContainerError {
     ExecveErr,
     WaitPidErr,
     DisableSyscall,
+    MountSysCall,
 }

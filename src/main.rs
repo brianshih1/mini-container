@@ -2,13 +2,16 @@ use std::{
     ffi::CString,
     os::fd::{AsRawFd, RawFd},
     path::PathBuf,
-    process::Child,
+    process::Child, fs::{create_dir_all, remove_dir},
 };
 
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
-use nix::sys::stat::Mode;
+use nix::{
+    mount::{mount, MsFlags, MntFlags, umount2},
+    sys::stat::Mode, unistd::{pivot_root, chdir},
+};
 use nix::{
     sched::{clone, CloneFlags},
     sys::{
@@ -55,7 +58,7 @@ pub struct ChildConfig {
 
     // File descriptor of the socket
     pub socket_fd: i32,
-    //
+    // TODO: root filesystem image directory
 }
 
 const STACK_SIZE: usize = 1024 * 1024;
@@ -95,14 +98,14 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
 
 fn child(config: &ChildConfig) -> ContainerResult {
     set_hostname()?;
-    mounts(config)?;
+    isolate_filesystem(config)?;
     user_ns(config)?;
     capabilities()?;
     syscalls()?;
     match execve::<CString, CString>(&config.exec_path, &config.args, &[]) {
         Ok(_) => Ok(()),
-        Err(_) => {
-            println!("Error!");
+        Err(e) => {
+            println!("Failed to execute!: {:?}", e);
             Err(ContainerError::ExecveErr)
         }
     }
@@ -137,8 +140,58 @@ fn set_hostname() -> ContainerResult {
     }
 }
 
-fn mounts(config: &ChildConfig) -> ContainerResult {
+fn isolate_filesystem(config: &ChildConfig) -> ContainerResult {
+    mount_filesystem(None, &PathBuf::from("/"),  vec![MsFlags::MS_REC, MsFlags::MS_PRIVATE])?;
+    let filesystem_path = PathBuf::from("/home/brianshih/alpine");
+    mount_filesystem(Some(&filesystem_path), &filesystem_path,  vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE])?;
+    
+    let old_root_path = "oldrootfs";
+    let old_root_absolute_path = PathBuf::from(format!("/home/brianshih/alpine/{old_root_path}"));
+    create_dir_all(&old_root_absolute_path).unwrap();
+
+   if let Err(e) =  pivot_root(&filesystem_path, &PathBuf::from(old_root_absolute_path)) {
+    println!("Failed to pivot root: {:?}", e);
+   };
+   if let Err(e) = umount2(&PathBuf::from(format!("/{old_root_path}")), MntFlags::MNT_DETACH)  {
+     println!("Failed to unmount: {:?}", e);
+   }
+   if let Err(e) =  remove_dir(&PathBuf::from(format!("/{old_root_path}"))) {
+    println!("Failed to remove directory: {:?}", e);
+   };
+
+  if let Err(e) =  chdir(&PathBuf::from("/")) {
+    println!("Failed to change directory to: /. Error: {:?}", e);
+  };
     Ok(())
+}
+
+// Wrapper around the mount syscall
+fn mount_filesystem(
+    filesystem_path: Option<&PathBuf>,
+    target_directory: &PathBuf,
+    flags: Vec<MsFlags>,
+) -> ContainerResult {
+    let mut mountflags = MsFlags::empty();
+    for flag in flags {
+        mountflags.insert(flag);
+    }
+    match mount::<PathBuf, PathBuf, PathBuf, PathBuf>(
+        filesystem_path,
+        target_directory,
+        None,
+        mountflags,
+        None,
+    ) {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            println!(
+              "Failed to mount directory. Target directory: {:?}. Filesystem Path: {:?}. Error: {:?}",
+              filesystem_path, 
+              target_directory, err
+            );
+            return Err(ContainerError::MountSysCall);
+        }
+    }
 }
 
 fn user_ns(config: &ChildConfig) -> ContainerResult {
