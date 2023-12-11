@@ -6,6 +6,7 @@ use std::{
     process::Child,
 };
 
+use cgroups_rs::cgroup_builder::CgroupBuilder;
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
@@ -24,7 +25,7 @@ use nix::{
     unistd::{execve, sethostname, Pid},
 };
 
-use rand::{seq::SliceRandom, Rng};
+use rand::{distributions::Alphanumeric, seq::SliceRandom, Rng};
 use std::process::exit;
 use syscallz::{Action, Cmp, Comparator, Context, Syscall};
 
@@ -50,7 +51,7 @@ struct Cli {
 #[derive(Debug)]
 pub struct ChildConfig {
     // The pid of the child process
-    pub pid: u32,
+    pub pid: i64,
 
     // Path to executable file
     pub exec_path: CString,
@@ -59,13 +60,16 @@ pub struct ChildConfig {
     pub args: Vec<CString>,
 
     // Memory limit of container (megabytes)
-    pub memory: Option<u32>,
+    pub memory: Option<i64>,
 
     // File descriptor of the socket
     pub socket_fd: i32,
 
     // TODO: root filesystem image directory
     pub root_filesystem_directory: String,
+
+    // Hostname for the container
+    pub hostname: String,
 }
 
 const STACK_SIZE: usize = 1024 * 1024;
@@ -104,7 +108,7 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
 }
 
 fn child(config: &ChildConfig) -> ContainerResult {
-    set_hostname()?;
+    set_hostname(config)?;
     isolate_filesystem(config)?;
     user_ns(config)?;
     capabilities()?;
@@ -118,26 +122,21 @@ fn child(config: &ChildConfig) -> ContainerResult {
     }
 }
 
-const SUITS: [&'static str; 4] = ["spades", "diamond", "heart", "clubs"];
-const CARDS: [&'static str; 13] = [
-    "ace", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "jack", "queen",
-    "king",
-];
-
 fn generate_random_hostname() -> String {
-    let mut rng = rand::thread_rng();
-    let suit = SUITS.choose(&mut rng).unwrap();
-    let card = CARDS.choose(&mut rng).unwrap();
-    let random_int: i32 = rng.gen();
-
-    format!("{}-{}-{}", suit, card, random_int)
+    let s: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(7)
+        .map(char::from)
+        .collect();
+    let s = format!("mini-{s}");
+    println!("{}", s);
+    s
 }
 
-fn set_hostname() -> ContainerResult {
-    let hostname = generate_random_hostname();
-    match sethostname(&hostname) {
+fn set_hostname(config: &ChildConfig) -> ContainerResult {
+    match sethostname(&config.hostname) {
         Ok(_) => {
-            println!("Set hostname to: {:?}", hostname);
+            println!("Set hostname to: {:?}", &config.hostname);
             Ok(())
         }
         Err(err) => {
@@ -293,7 +292,14 @@ fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
     Ok(())
 }
 
-fn resources(config: &ChildConfig) {}
+fn resources(config: &ChildConfig) {
+    let mut cg_builder = CgroupBuilder::new(&config.hostname);
+    if let Some(memory_limit) = config.memory {
+        println!("Setting memory lkmit to: {:?}", memory_limit);
+        cg_builder = cg_builder.memory().memory_hard_limit(memory_limit).done();
+    }
+    cg_builder.build(cgroups_rs::hierarchies::auto());
+}
 
 fn create_socketpair() -> Result<(RawFd, RawFd), ContainerError> {
     match socketpair(
@@ -314,7 +320,6 @@ fn run() -> ContainerResult {
     assert!(split_command.len() > 0);
 
     let (parent_socket, child_socket) = create_socketpair()?;
-
     let config = ChildConfig {
         pid: 0,
         exec_path: CString::new(split_command[0]).unwrap(),
@@ -325,6 +330,7 @@ fn run() -> ContainerResult {
         memory: Some(10),
         socket_fd: child_socket,
         root_filesystem_directory: cli.root_filesystem_path,
+        hostname: generate_random_hostname(),
     };
     println!("Config: {:?}", config);
 

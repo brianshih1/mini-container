@@ -11,3 +11,5 @@ libc = "0.2.149"
 nix = { version = "0.27.1", features = ["sched", "socket", "hostname", "fs", "mount"] }
 rand = "0.8.5"
 syscallz = "0.17.0"
+cgroups-rs = "0.2.6"
+
