@@ -1,7 +1,10 @@
+use std::os::fd::OwnedFd;
+use std::os::unix::io::RawFd;
 use std::{
     ffi::CString,
-    fs::{create_dir_all, remove_dir},
-    os::fd::{AsRawFd, RawFd},
+    fs::{create_dir_all, remove_dir, File},
+    io::Write,
+    os::fd::AsRawFd,
     path::PathBuf,
     process::Child,
 };
@@ -17,14 +20,15 @@ use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
-    sys::stat::Mode,
-    unistd::{chdir, pivot_root},
+    sched::unshare,
+    sys::{socket::MsgFlags, stat::Mode},
+    unistd::{chdir, pivot_root, setresuid, Uid},
 };
 use nix::{
     sched::{clone, CloneFlags},
     sys::{
         signal::Signal,
-        socket::{socketpair, AddressFamily, SockFlag, SockType},
+        socket::{recv, send, socketpair, AddressFamily, SockFlag, SockType},
         wait::waitpid,
     },
     unistd::{execve, sethostname, Pid},
@@ -126,8 +130,10 @@ fn child(config: &ChildConfig) -> ContainerResult {
     set_hostname(config)?;
     isolate_filesystem(config)?;
     user_ns(config)?;
+    println!("Finished user namespace");
     capabilities()?;
     syscalls()?;
+    println!("Executing!");
     match execve::<CString, CString>(&config.exec_path, &config.args, &[]) {
         Ok(_) => Ok(()),
         Err(e) => {
@@ -231,6 +237,26 @@ fn mount_filesystem(
 }
 
 fn user_ns(config: &ChildConfig) -> ContainerResult {
+    if let Err(e) = unshare(CloneFlags::CLONE_NEWUSER) {
+        println!("Failed to unshare with new user namespace: {:?}", e);
+        return Err(ContainerError::UnshareNewUser);
+    }
+
+    println!("Notifying parent that user namespace is created");
+
+    // Notifies the parent process that the child process has created a new user namespace
+    socket_send(config.socket_fd)?;
+
+    // Wait for the parent process to update the uid_map before setting the uid
+
+    socket_recv(config.socket_fd)?;
+    println!("setting resuid");
+
+    if let Err(e) = setresuid(Uid::from_raw(0), Uid::from_raw(0), Uid::from_raw(0)) {
+        println!("Failed to set uid. Error: {:?}", e);
+    };
+    println!("Finished setting resuid");
+
     Ok(())
 }
 
@@ -303,6 +329,27 @@ fn syscalls() -> ContainerResult {
 }
 
 fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
+    // Wait for the user to create a user namespace
+    socket_recv(fd)?;
+
+    println!("Updating uid_map");
+    match File::create(format!("/proc/{}/{}", pid.as_raw(), "uid_map")) {
+        Ok(mut uid_map) => {
+            if let Err(e) = uid_map.write_all(format!("0 {} {}", 10000, 2000).as_bytes()) {
+                println!("Failed to write to uid_map. Error: {:?}", e);
+                return Err(ContainerError::UidMapErr);
+            }
+        }
+        Err(e) => {
+            println!("Failed to create uid_map. Error: {:?}", e);
+            return Err(ContainerError::UidMapErr);
+        }
+    }
+
+    println!("Finished updating uid_map. Notifying child process");
+
+    // Notify the user that the uid_map is updated
+    socket_send(fd)?;
     Ok(())
 }
 
@@ -326,22 +373,40 @@ fn resources(config: &ChildConfig, pid: Pid) -> ContainerResult {
     let pid: u64 = pid.as_raw() as u64;
 
     if let Err(e) = cg.add_task(CgroupPid::from(pid)) {
+        println!("Failed to add task to cgroup. Error: {:?}", e);
         return Err(ContainerError::CgroupPidErr);
     };
 
     Ok(())
 }
 
-fn create_socketpair() -> Result<(RawFd, RawFd), ContainerError> {
+fn create_socketpair() -> Result<(OwnedFd, OwnedFd), ContainerError> {
     match socketpair(
         AddressFamily::Unix,
         SockType::SeqPacket,
         None,
         SockFlag::SOCK_CLOEXEC,
     ) {
-        Ok((first, second)) => Ok((first.as_raw_fd(), second.as_raw_fd())),
+        Ok((first, second)) => Ok((first, second)),
         Err(_) => Err(ContainerError::CreateSocketErr),
     }
+}
+
+pub fn socket_send(fd: RawFd) -> ContainerResult {
+    println!("fd: {:?}", fd);
+    if let Err(e) = send(fd, &vec![], MsgFlags::empty()) {
+        println!("Socket failed to send. Error: {:?}", e);
+        return Err(ContainerError::SocketSendErr);
+    };
+    Ok(())
+}
+
+pub fn socket_recv(fd: RawFd) -> ContainerResult {
+    if let Err(e) = recv(fd, &mut vec![0, 0], MsgFlags::empty()) {
+        println!("Socket failed to receive. Error: {:?}", e);
+        return Err(ContainerError::SocketRecvErr);
+    }
+    Ok(())
 }
 
 fn run() -> ContainerResult {
@@ -350,7 +415,11 @@ fn run() -> ContainerResult {
     let split_command = cli.command.split(" ").collect::<Vec<&str>>();
     assert!(split_command.len() > 0);
 
-    let (parent_socket, child_socket) = create_socketpair()?;
+    let (child_socket, parent_socket) = create_socketpair()?;
+    println!(
+        "Parent socket: {:?}. Child socket: {:?}",
+        parent_socket, child_socket
+    );
     let config = ChildConfig {
         pid: 0,
         exec_path: CString::new(split_command[0]).unwrap(),
@@ -359,7 +428,7 @@ fn run() -> ContainerResult {
             .map(|c| CString::new(*c).unwrap())
             .collect(),
         memory: cli.memory,
-        socket_fd: child_socket,
+        socket_fd: child_socket.as_raw_fd(),
         root_filesystem_directory: cli.root_filesystem_path,
         hostname: generate_random_hostname(),
         max_pids: cli.nproc,
@@ -369,7 +438,7 @@ fn run() -> ContainerResult {
     let child_pid = create_child_process(&config)?;
     resources(&config, child_pid)?;
 
-    handle_child_uid_map(child_pid, parent_socket)?;
+    handle_child_uid_map(child_pid, parent_socket.as_raw_fd())?;
     if let Err(e) = waitpid(child_pid, None) {
         println!("Error waiting for pid: {:?}", e);
         return Err(ContainerError::WaitPidErr);

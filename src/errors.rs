@@ -13,4 +13,8 @@ pub enum ContainerError {
     RemoveDirErr,
     ChangeDirErr,
     CgroupPidErr,
+    UnshareNewUser,
+    SocketSendErr,
+    SocketRecvErr,
+    UidMapErr,
 }
