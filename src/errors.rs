@@ -12,4 +12,5 @@ pub enum ContainerError {
     CreateDirErr,
     RemoveDirErr,
     ChangeDirErr,
+    CgroupPidErr,
 }

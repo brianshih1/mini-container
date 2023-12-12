@@ -6,7 +6,12 @@ use std::{
     process::Child,
 };
 
-use cgroups_rs::cgroup_builder::CgroupBuilder;
+use cgroups_rs::{
+    cgroup_builder::CgroupBuilder,
+    hierarchies::V2,
+    memory::{MemController, SetMemory},
+    CgroupPid, MaxValue,
+};
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
@@ -45,7 +50,11 @@ struct Cli {
 
     /// Memory limit (megabytes)
     #[arg(short, long)]
-    memory: Option<u32>,
+    memory: Option<i64>,
+
+    /// Memory limit (megabytes)
+    #[arg(long)]
+    nproc: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -61,6 +70,9 @@ pub struct ChildConfig {
 
     // Memory limit of container (megabytes)
     pub memory: Option<i64>,
+
+    // Maximum number of pids the child process can create
+    pub max_pids: Option<i64>,
 
     // File descriptor of the socket
     pub socket_fd: i32,
@@ -102,7 +114,10 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
     };
 
     match clone_res {
-        Ok(pid) => Ok(pid),
+        Ok(pid) => {
+            println!("Pid: {:?}", pid);
+            Ok(pid)
+        }
         Err(_) => Err(ContainerError::CloneErr),
     }
 }
@@ -128,9 +143,8 @@ fn generate_random_hostname() -> String {
         .take(7)
         .map(char::from)
         .collect();
-    let s = format!("mini-{s}");
-    println!("{}", s);
-    s
+    let hostname = format!("mini-{s}");
+    hostname
 }
 
 fn set_hostname(config: &ChildConfig) -> ContainerResult {
@@ -292,13 +306,30 @@ fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
     Ok(())
 }
 
-fn resources(config: &ChildConfig) {
+fn resources(config: &ChildConfig, pid: Pid) -> ContainerResult {
+    println!("Restricting resource!");
     let mut cg_builder = CgroupBuilder::new(&config.hostname);
     if let Some(memory_limit) = config.memory {
-        println!("Setting memory lkmit to: {:?}", memory_limit);
+        println!("Setting memory limit to: {:?}", memory_limit);
+
         cg_builder = cg_builder.memory().memory_hard_limit(memory_limit).done();
     }
-    cg_builder.build(cgroups_rs::hierarchies::auto());
+    if let Some(max_pids) = config.max_pids {
+        cg_builder = cg_builder
+            .pid()
+            .maximum_number_of_processes(cgroups_rs::MaxValue::Value(max_pids))
+            .done();
+    }
+
+    let cg = cg_builder.build(Box::new(V2::new()));
+
+    let pid: u64 = pid.as_raw() as u64;
+
+    if let Err(e) = cg.add_task(CgroupPid::from(pid)) {
+        return Err(ContainerError::CgroupPidErr);
+    };
+
+    Ok(())
 }
 
 fn create_socketpair() -> Result<(RawFd, RawFd), ContainerError> {
@@ -327,15 +358,17 @@ fn run() -> ContainerResult {
             .iter()
             .map(|c| CString::new(*c).unwrap())
             .collect(),
-        memory: Some(10),
+        memory: cli.memory,
         socket_fd: child_socket,
         root_filesystem_directory: cli.root_filesystem_path,
         hostname: generate_random_hostname(),
+        max_pids: cli.nproc,
     };
     println!("Config: {:?}", config);
 
-    resources(&config);
     let child_pid = create_child_process(&config)?;
+    resources(&config, child_pid)?;
+
     handle_child_uid_map(child_pid, parent_socket)?;
     if let Err(e) = waitpid(child_pid, None) {
         println!("Error waiting for pid: {:?}", e);
