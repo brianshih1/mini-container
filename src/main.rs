@@ -60,6 +60,10 @@ struct Cli {
     /// Memory limit (megabytes)
     #[arg(long)]
     nproc: Option<i64>,
+
+    /// Memory limit (megabytes)
+    #[arg(short, long)]
+    user: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -87,6 +91,9 @@ pub struct ChildConfig {
 
     // Hostname for the container
     pub hostname: String,
+
+    // The user ID that runs the child process
+    pub user_id: Option<u32>,
 }
 
 const STACK_SIZE: usize = 1024 * 1024;
@@ -243,6 +250,11 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
         return Err(ContainerError::UnshareNewUser);
     }
 
+    let user_id = match config.user_id {
+        Some(id) => id,
+        None => 0, // default to run as root if no user ID is provided
+    };
+
     println!("Notifying parent process that user namespace is created");
 
     // Notifies the parent process that the child process has created a new user namespace
@@ -252,7 +264,12 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
 
     socket_recv(config.socket_fd)?;
 
-    if let Err(e) = setresuid(Uid::from_raw(0), Uid::from_raw(0), Uid::from_raw(0)) {
+    println!("Setting UID: {:?}", user_id);
+    if let Err(e) = setresuid(
+        Uid::from_raw(user_id),
+        Uid::from_raw(user_id),
+        Uid::from_raw(user_id),
+    ) {
         println!("Failed to set uid. Error: {:?}", e);
         return Err(ContainerError::SetResuidErr);
     };
@@ -328,14 +345,19 @@ fn syscalls() -> ContainerResult {
     Ok(())
 }
 
-fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
+fn handle_child_uid_map(pid: Pid, fd: i32, user_id: Option<u32>) -> ContainerResult {
     // Wait for the user to create a user namespace
     socket_recv(fd)?;
+
+    let user_id = match user_id {
+        Some(id) => id,
+        None => 0, // default to run as root if no user ID is provided
+    };
 
     println!("Updating uid_map");
     match File::create(format!("/proc/{}/{}", pid.as_raw(), "uid_map")) {
         Ok(mut uid_map) => {
-            if let Err(e) = uid_map.write_all(format!("0 {} {}", 10000, 2000).as_bytes()) {
+            if let Err(e) = uid_map.write_all(format!("0 {} {}", 1000, 1000).as_bytes()) {
                 println!("Failed to write to uid_map. Error: {:?}", e);
                 return Err(ContainerError::UidMapErr);
             }
@@ -348,7 +370,7 @@ fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
 
     match File::create(format!("/proc/{}/{}", pid.as_raw(), "gid_map")) {
         Ok(mut uid_map) => {
-            if let Err(e) = uid_map.write_all(format!("0 {} {}", 10000, 2000).as_bytes()) {
+            if let Err(e) = uid_map.write_all(format!("0 {} {}", 1000, 1000).as_bytes()) {
                 println!("Failed to write to uid_map. Error: {:?}", e);
                 return Err(ContainerError::UidMapErr);
             }
@@ -444,13 +466,14 @@ fn run() -> ContainerResult {
         root_filesystem_directory: cli.root_filesystem_path,
         hostname: generate_random_hostname(),
         max_pids: cli.nproc,
+        user_id: cli.user,
     };
     println!("Config: {:?}", config);
 
     let child_pid = create_child_process(&config)?;
     resources(&config, child_pid)?;
 
-    handle_child_uid_map(child_pid, parent_socket.as_raw_fd())?;
+    handle_child_uid_map(child_pid, parent_socket.as_raw_fd(), config.user_id.clone())?;
     if let Err(e) = waitpid(child_pid, None) {
         println!("Error waiting for pid: {:?}", e);
         return Err(ContainerError::WaitPidErr);
