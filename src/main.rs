@@ -130,7 +130,7 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
 fn child(config: &ChildConfig) -> ContainerResult {
     set_hostname(config)?;
     isolate_filesystem(config)?;
-    // user_ns(config)?;
+    user_ns(config)?;
     println!("Finished user namespace");
     capabilities()?;
     syscalls()?;
@@ -290,7 +290,8 @@ fn syscalls() -> ContainerResult {
         (Syscall::fchmodat, 2, s_isgid),
         (Syscall::unshare, 0, clone_newuser),
         (Syscall::clone, 0, clone_newuser),
-        (Syscall::ioctl, 1, TIOCSTI),
+        // TODO: ioctl causes an error when running /bin/ash somehow...
+        // (Syscall::ioctl, 1, TIOCSTI),
     ];
     match Context::init_with_action(Action::Allow) {
         Ok(mut ctx) => {
