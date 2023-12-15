@@ -18,6 +18,7 @@ use cgroups_rs::{
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
+use nix::unistd::{setgroups, setresgid, Gid};
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::unshare,
@@ -129,7 +130,7 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
 fn child(config: &ChildConfig) -> ContainerResult {
     set_hostname(config)?;
     isolate_filesystem(config)?;
-    user_ns(config)?;
+    // user_ns(config)?;
     println!("Finished user namespace");
     capabilities()?;
     syscalls()?;
@@ -242,7 +243,7 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
         return Err(ContainerError::UnshareNewUser);
     }
 
-    println!("Notifying parent that user namespace is created");
+    println!("Notifying parent process that user namespace is created");
 
     // Notifies the parent process that the child process has created a new user namespace
     socket_send(config.socket_fd)?;
@@ -250,13 +251,11 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
     // Wait for the parent process to update the uid_map before setting the uid
 
     socket_recv(config.socket_fd)?;
-    println!("setting resuid");
 
     if let Err(e) = setresuid(Uid::from_raw(0), Uid::from_raw(0), Uid::from_raw(0)) {
         println!("Failed to set uid. Error: {:?}", e);
+        return Err(ContainerError::SetResuidErr);
     };
-    println!("Finished setting resuid");
-
     Ok(())
 }
 
@@ -304,7 +303,7 @@ fn syscalls() -> ContainerResult {
 
             for (syscall, arg_idx, bit) in conditional_syscalls {
                 if let Err(err) = ctx.set_rule_for_syscall(
-                    Action::Errno(0),
+                    Action::Errno(1000),
                     syscall,
                     &[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
                 ) {
@@ -334,6 +333,19 @@ fn handle_child_uid_map(pid: Pid, fd: i32) -> ContainerResult {
 
     println!("Updating uid_map");
     match File::create(format!("/proc/{}/{}", pid.as_raw(), "uid_map")) {
+        Ok(mut uid_map) => {
+            if let Err(e) = uid_map.write_all(format!("0 {} {}", 10000, 2000).as_bytes()) {
+                println!("Failed to write to uid_map. Error: {:?}", e);
+                return Err(ContainerError::UidMapErr);
+            }
+        }
+        Err(e) => {
+            println!("Failed to create uid_map. Error: {:?}", e);
+            return Err(ContainerError::UidMapErr);
+        }
+    }
+
+    match File::create(format!("/proc/{}/{}", pid.as_raw(), "gid_map")) {
         Ok(mut uid_map) => {
             if let Err(e) = uid_map.write_all(format!("0 {} {}", 10000, 2000).as_bytes()) {
                 println!("Failed to write to uid_map. Error: {:?}", e);
@@ -393,7 +405,6 @@ fn create_socketpair() -> Result<(OwnedFd, OwnedFd), ContainerError> {
 }
 
 pub fn socket_send(fd: RawFd) -> ContainerResult {
-    println!("fd: {:?}", fd);
     if let Err(e) = send(fd, &vec![], MsgFlags::empty()) {
         println!("Socket failed to send. Error: {:?}", e);
         return Err(ContainerError::SocketSendErr);

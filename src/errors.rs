@@ -17,4 +17,5 @@ pub enum ContainerError {
     SocketSendErr,
     SocketRecvErr,
     UidMapErr,
+    SetResuidErr,
 }
