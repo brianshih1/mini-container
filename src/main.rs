@@ -9,6 +9,7 @@ use std::{
     process::Child,
 };
 
+use caps::Capability;
 use cgroups_rs::{
     cgroup_builder::CgroupBuilder,
     hierarchies::V2,
@@ -18,7 +19,7 @@ use cgroups_rs::{
 use clap::{Parser, Subcommand};
 use errors::{ContainerError, ContainerResult};
 use libc::TIOCSTI;
-use nix::unistd::{setgroups, setresgid, Gid};
+use nix::unistd::{gettid, setgroups, setresgid, Gid};
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::unshare,
@@ -35,6 +36,7 @@ use nix::{
     unistd::{execve, sethostname, Pid},
 };
 
+use phf::phf_map;
 use rand::{distributions::Alphanumeric, seq::SliceRandom, Rng};
 use std::process::exit;
 use syscallz::{Action, Cmp, Comparator, Context, Syscall};
@@ -64,6 +66,14 @@ struct Cli {
     /// Memory limit (megabytes)
     #[arg(short, long)]
     user: Option<u32>,
+
+    // Add capabilities to the bounding set
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    cap_add: Option<Vec<String>>,
+
+    // Remove capabilities to the bounding set, or all if the String provided is "ALL"
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    cap_drop: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -94,6 +104,12 @@ pub struct ChildConfig {
 
     // The user ID that runs the child process
     pub user_id: Option<u32>,
+
+    // Add a capability to the bounding set
+    pub cap_add: Option<Vec<String>>,
+
+    // Remove a capability to the bounding set, or all if the String provided is "ALL"
+    pub cap_drop: Option<Vec<String>>,
 }
 
 const STACK_SIZE: usize = 1024 * 1024;
@@ -127,10 +143,10 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
 
     match clone_res {
         Ok(pid) => {
-            println!("Pid: {:?}", pid);
+            println!("Child pid: {:?}", pid);
             Ok(pid)
         }
-        Err(_) => Err(ContainerError::CloneErr),
+        Err(_) => Err(ContainerError::Clone),
     }
 }
 
@@ -139,14 +155,14 @@ fn child(config: &ChildConfig) -> ContainerResult {
     isolate_filesystem(config)?;
     user_ns(config)?;
     println!("Finished user namespace");
-    capabilities()?;
+    capabilities(config)?;
     syscalls()?;
     println!("Executing!");
     match execve::<CString, CString>(&config.exec_path, &config.args, &[]) {
         Ok(_) => Ok(()),
         Err(e) => {
             println!("Failed to execute!: {:?}", e);
-            Err(ContainerError::ExecveErr)
+            Err(ContainerError::Execve)
         }
     }
 }
@@ -192,28 +208,28 @@ fn isolate_filesystem(config: &ChildConfig) -> ContainerResult {
     let old_root_absolute_path = PathBuf::from(format!("{root_filesystem_path}/{old_root_path}"));
     if let Err(e) = create_dir_all(&old_root_absolute_path) {
         println!("Failed to create directory to hold old root: {:?}", e);
-        return Err(ContainerError::CreateDirErr);
+        return Err(ContainerError::CreateDir);
     }
 
     if let Err(e) = pivot_root(&filesystem_path, &PathBuf::from(old_root_absolute_path)) {
         println!("Failed to pivot root: {:?}", e);
-        return Err(ContainerError::PivotRootErr);
+        return Err(ContainerError::PivotRoot);
     };
     if let Err(e) = umount2(
         &PathBuf::from(format!("/{old_root_path}")),
         MntFlags::MNT_DETACH,
     ) {
         println!("Failed to unmount: {:?}", e);
-        return Err(ContainerError::UmountErr);
+        return Err(ContainerError::Umount);
     }
     if let Err(e) = remove_dir(&PathBuf::from(format!("/{old_root_path}"))) {
         println!("Failed to remove directory: {:?}", e);
-        return Err(ContainerError::RemoveDirErr);
+        return Err(ContainerError::RemoveDir);
     };
 
     if let Err(e) = chdir(&PathBuf::from("/")) {
         println!("Failed to change directory to: /. Error: {:?}", e);
-        return Err(ContainerError::ChangeDirErr);
+        return Err(ContainerError::ChangeDir);
     };
     println!("Finished isolating filesystem!");
     Ok(())
@@ -250,13 +266,6 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
         return Err(ContainerError::UnshareNewUser);
     }
 
-    let user_id = match config.user_id {
-        Some(id) => id,
-        None => 0, // default to run as root if no user ID is provided
-    };
-
-    println!("Notifying parent process that user namespace is created");
-
     // Notifies the parent process that the child process has created a new user namespace
     socket_send(config.socket_fd)?;
 
@@ -264,19 +273,106 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
 
     socket_recv(config.socket_fd)?;
 
-    println!("Setting UID: {:?}", user_id);
-    if let Err(e) = setresuid(
-        Uid::from_raw(user_id),
-        Uid::from_raw(user_id),
-        Uid::from_raw(user_id),
-    ) {
-        println!("Failed to set uid. Error: {:?}", e);
-        return Err(ContainerError::SetResuidErr);
-    };
+    if let Some(user_id) = config.user_id {
+        println!("Setting UID to: {:?}", config.user_id);
+        if let Err(e) = setresuid(
+            Uid::from_raw(user_id),
+            Uid::from_raw(user_id),
+            Uid::from_raw(user_id),
+        ) {
+            println!("Failed to set uid. Error: {:?}", e);
+            return Err(ContainerError::SetResuid);
+        };
+    }
+
     Ok(())
 }
 
-fn capabilities() -> ContainerResult {
+static CAPABILITIES: phf::Map<&'static str, Capability> = phf_map! {
+    "NET_BIND_SERVICE" => caps::Capability::CAP_NET_BIND_SERVICE,
+    "CAP_SYS_TIME" => caps::Capability::CAP_SYS_TIME,
+};
+
+fn capabilities(config: &ChildConfig) -> ContainerResult {
+    println!("Setting capabilities");
+    if let Some(caps) = &config.cap_drop {
+        if caps.contains(&String::from("ALL")) {
+            // If `tid` is `None`, this operates on current thread (tid=0).
+            if let Err(e) = caps::clear(None, caps::CapSet::Bounding) {
+                println!("Failed to clear all capabilities. Error: {:?}", e);
+                return Err(ContainerError::CapabilityDrop);
+            }
+        } else {
+            for c in caps.iter() {
+                match CAPABILITIES.get(c) {
+                    Some(c) => {
+                        if let Err(e) = caps::drop(None, caps::CapSet::Bounding, *c) {
+                            println!("Failed to drop Capability: {:?}. Error: {:?}", *c, e);
+                            return Err(ContainerError::CapabilityDrop);
+                        }
+
+                        if let Err(e) = caps::drop(None, caps::CapSet::Inheritable, *c) {
+                            println!("Failed to drop Capability: {:?}. Error: {:?}", *c, e);
+                            return Err(ContainerError::CapabilityDrop);
+                        }
+                    }
+                    None => {
+                        println!("Invalid capabiliy to drop: {:?}", c);
+                        return Err(ContainerError::CapabilityDrop);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Err(e) = caps::raise(
+        None,
+        caps::CapSet::Inheritable,
+        caps::Capability::CAP_NET_BIND_SERVICE,
+    ) {
+        println!(
+            "Failed to add Capability: {:?}. Error: {:?}",
+            caps::Capability::CAP_NET_BIND_SERVICE,
+            e
+        );
+        return Err(ContainerError::CapabilityAdd);
+    }
+    if let Err(e) = caps::raise(
+        None,
+        caps::CapSet::Ambient,
+        caps::Capability::CAP_NET_BIND_SERVICE,
+    ) {
+        println!(
+            "Failed to add Capability: {:?}. Error: {:?}",
+            caps::Capability::CAP_NET_BIND_SERVICE,
+            e
+        );
+        return Err(ContainerError::CapabilityAdd);
+    }
+
+    if let Some(caps) = &config.cap_add {
+        for c in caps.iter() {
+            println!("Adding c: {:?}", c);
+            match CAPABILITIES.get(c) {
+                Some(c) => {
+                    if let Err(e) = caps::raise(None, caps::CapSet::Inheritable, *c) {
+                        println!("Failed to add Capability: {:?}. Error: {:?}", *c, e);
+                        return Err(ContainerError::CapabilityAdd);
+                    }
+                    if let Err(e) = caps::raise(None, caps::CapSet::Ambient, *c) {
+                        println!("Failed to add Capability: {:?}. Error: {:?}", *c, e);
+                        return Err(ContainerError::CapabilityAdd);
+                    }
+                }
+                None => {
+                    println!("Invalid capabiliy to raise: {:?}", c);
+                    return Err(ContainerError::CapabilityAdd);
+                }
+            }
+        }
+    }
+    println!("Finished setting capabilities");
+
     Ok(())
 }
 
@@ -359,12 +455,12 @@ fn handle_child_uid_map(pid: Pid, fd: i32, user_id: Option<u32>) -> ContainerRes
         Ok(mut uid_map) => {
             if let Err(e) = uid_map.write_all(format!("0 {} {}", 1000, 1000).as_bytes()) {
                 println!("Failed to write to uid_map. Error: {:?}", e);
-                return Err(ContainerError::UidMapErr);
+                return Err(ContainerError::UidMap);
             }
         }
         Err(e) => {
             println!("Failed to create uid_map. Error: {:?}", e);
-            return Err(ContainerError::UidMapErr);
+            return Err(ContainerError::UidMap);
         }
     }
 
@@ -372,12 +468,12 @@ fn handle_child_uid_map(pid: Pid, fd: i32, user_id: Option<u32>) -> ContainerRes
         Ok(mut uid_map) => {
             if let Err(e) = uid_map.write_all(format!("0 {} {}", 1000, 1000).as_bytes()) {
                 println!("Failed to write to uid_map. Error: {:?}", e);
-                return Err(ContainerError::UidMapErr);
+                return Err(ContainerError::UidMap);
             }
         }
         Err(e) => {
             println!("Failed to create uid_map. Error: {:?}", e);
-            return Err(ContainerError::UidMapErr);
+            return Err(ContainerError::UidMap);
         }
     }
 
@@ -430,7 +526,7 @@ fn create_socketpair() -> Result<(OwnedFd, OwnedFd), ContainerError> {
 pub fn socket_send(fd: RawFd) -> ContainerResult {
     if let Err(e) = send(fd, &vec![], MsgFlags::empty()) {
         println!("Socket failed to send. Error: {:?}", e);
-        return Err(ContainerError::SocketSendErr);
+        return Err(ContainerError::SocketSend);
     };
     Ok(())
 }
@@ -438,7 +534,7 @@ pub fn socket_send(fd: RawFd) -> ContainerResult {
 pub fn socket_recv(fd: RawFd) -> ContainerResult {
     if let Err(e) = recv(fd, &mut vec![0, 0], MsgFlags::empty()) {
         println!("Socket failed to receive. Error: {:?}", e);
-        return Err(ContainerError::SocketRecvErr);
+        return Err(ContainerError::SocketRecv);
     }
     Ok(())
 }
@@ -467,6 +563,8 @@ fn run() -> ContainerResult {
         hostname: generate_random_hostname(),
         max_pids: cli.nproc,
         user_id: cli.user,
+        cap_add: cli.cap_add,
+        cap_drop: cli.cap_drop,
     };
     println!("Config: {:?}", config);
 
@@ -476,7 +574,7 @@ fn run() -> ContainerResult {
     handle_child_uid_map(child_pid, parent_socket.as_raw_fd(), config.user_id.clone())?;
     if let Err(e) = waitpid(child_pid, None) {
         println!("Error waiting for pid: {:?}", e);
-        return Err(ContainerError::WaitPidErr);
+        return Err(ContainerError::WaitPid);
     };
     Ok(())
 }

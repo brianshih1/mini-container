@@ -12,4 +12,6 @@ nix = { version = "0.27.1", features = ["sched", "socket", "hostname", "fs", "mo
 rand = "0.8.5"
 syscallz = "0.17.0"
 cgroups-rs = "0.2.6"
+caps = "0.5.5"
+phf = { version = "0.11.2", features = ["macros"] }
 
