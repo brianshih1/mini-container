@@ -290,17 +290,41 @@ fn user_ns(config: &ChildConfig) -> ContainerResult {
 
 static CAPABILITIES: phf::Map<&'static str, Capability> = phf_map! {
     "NET_BIND_SERVICE" => caps::Capability::CAP_NET_BIND_SERVICE,
+    "SETUID" => caps::Capability::CAP_SETUID,
     "CAP_SYS_TIME" => caps::Capability::CAP_SYS_TIME,
 };
 
 fn capabilities(config: &ChildConfig) -> ContainerResult {
     println!("Setting capabilities");
+    let caps_add: Vec<Capability> = match &config.cap_add {
+        Some(cap_add) => {
+            let mut res = vec![];
+            for c in cap_add.iter() {
+                println!("Adding c: {:?}", c);
+                match CAPABILITIES.get(c) {
+                    Some(c) => {
+                        res.push(c.clone());
+                    }
+                    None => {
+                        println!("Invalid capabiliy to raise: {:?}", c);
+                        return Err(ContainerError::CapabilityAdd);
+                    }
+                }
+            }
+            res
+        }
+        None => vec![],
+    };
     if let Some(caps) = &config.cap_drop {
         if caps.contains(&String::from("ALL")) {
-            // If `tid` is `None`, this operates on current thread (tid=0).
-            if let Err(e) = caps::clear(None, caps::CapSet::Bounding) {
-                println!("Failed to clear all capabilities. Error: {:?}", e);
-                return Err(ContainerError::CapabilityDrop);
+            let bounding_caps = caps::read(None, caps::CapSet::Bounding).unwrap();
+            for cap in bounding_caps.iter() {
+                if !caps_add.contains(cap) {
+                    if let Err(e) = caps::drop(None, caps::CapSet::Bounding, *cap) {
+                        println!("Failed to clear all capabilities. Error: {:?}", e);
+                        return Err(ContainerError::CapabilityDrop);
+                    }
+                }
             }
         } else {
             for c in caps.iter() {
@@ -325,52 +349,18 @@ fn capabilities(config: &ChildConfig) -> ContainerResult {
         }
     }
 
-    if let Err(e) = caps::raise(
-        None,
-        caps::CapSet::Inheritable,
-        caps::Capability::CAP_NET_BIND_SERVICE,
-    ) {
-        println!(
-            "Failed to add Capability: {:?}. Error: {:?}",
-            caps::Capability::CAP_NET_BIND_SERVICE,
-            e
-        );
-        return Err(ContainerError::CapabilityAdd);
-    }
-    if let Err(e) = caps::raise(
-        None,
-        caps::CapSet::Ambient,
-        caps::Capability::CAP_NET_BIND_SERVICE,
-    ) {
-        println!(
-            "Failed to add Capability: {:?}. Error: {:?}",
-            caps::Capability::CAP_NET_BIND_SERVICE,
-            e
-        );
-        return Err(ContainerError::CapabilityAdd);
-    }
-
-    if let Some(caps) = &config.cap_add {
-        for c in caps.iter() {
-            println!("Adding c: {:?}", c);
-            match CAPABILITIES.get(c) {
-                Some(c) => {
-                    if let Err(e) = caps::raise(None, caps::CapSet::Inheritable, *c) {
-                        println!("Failed to add Capability: {:?}. Error: {:?}", *c, e);
-                        return Err(ContainerError::CapabilityAdd);
-                    }
-                    if let Err(e) = caps::raise(None, caps::CapSet::Ambient, *c) {
-                        println!("Failed to add Capability: {:?}. Error: {:?}", *c, e);
-                        return Err(ContainerError::CapabilityAdd);
-                    }
-                }
-                None => {
-                    println!("Invalid capabiliy to raise: {:?}", c);
-                    return Err(ContainerError::CapabilityAdd);
-                }
-            }
+    for cap in caps_add.iter() {
+        println!("Adding c: {:?}", cap);
+        if let Err(e) = caps::raise(None, caps::CapSet::Inheritable, *cap) {
+            println!("Failed to add Capability: {:?}. Error: {:?}", *cap, e);
+            return Err(ContainerError::CapabilityAdd);
+        }
+        if let Err(e) = caps::raise(None, caps::CapSet::Ambient, *cap) {
+            println!("Failed to add Capability: {:?}. Error: {:?}", *cap, e);
+            return Err(ContainerError::CapabilityAdd);
         }
     }
+
     println!("Finished setting capabilities");
 
     Ok(())
