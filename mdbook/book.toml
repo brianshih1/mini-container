@@ -1,0 +1,6 @@
+[book]
+authors = ["Brian Shih"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Building a Container from Scratch in Rust"
