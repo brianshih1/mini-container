@@ -150,6 +150,7 @@ fn create_child_process(config: &ChildConfig) -> Result<Pid, ContainerError> {
     }
 }
 
+// setup the namespaces, capabilities, syscall restrictions before running the executable
 fn child(config: &ChildConfig) -> ContainerResult {
     set_hostname(config)?;
     isolate_filesystem(config)?;
@@ -296,6 +297,8 @@ static CAPABILITIES: phf::Map<&'static str, Capability> = phf_map! {
 
 fn capabilities(config: &ChildConfig) -> ContainerResult {
     println!("Setting capabilities");
+
+    // compute the list of capabilities to add
     let caps_add: Vec<Capability> = match &config.cap_add {
         Some(cap_add) => {
             let mut res = vec![];
@@ -315,6 +318,9 @@ fn capabilities(config: &ChildConfig) -> ContainerResult {
         }
         None => vec![],
     };
+
+    // if ALL is inside the capabilities to drop, then drop all capabilities except
+    // for the ones inside capabilities to add
     if let Some(caps) = &config.cap_drop {
         if caps.contains(&String::from("ALL")) {
             let bounding_caps = caps::read(None, caps::CapSet::Bounding).unwrap();
@@ -366,20 +372,20 @@ fn capabilities(config: &ChildConfig) -> ContainerResult {
     Ok(())
 }
 
+const DISABLED_SYSCALLS: [Syscall; 9] = [
+    Syscall::keyctl,
+    Syscall::add_key,
+    Syscall::request_key,
+    Syscall::ptrace,
+    Syscall::mbind,
+    Syscall::migrate_pages,
+    Syscall::set_mempolicy,
+    Syscall::userfaultfd,
+    Syscall::perf_event_open,
+];
+
 fn syscalls() -> ContainerResult {
     println!("Disabling syscalls!");
-
-    let disabled_syscalls = [
-        Syscall::keyctl,
-        Syscall::add_key,
-        Syscall::request_key,
-        Syscall::ptrace,
-        Syscall::mbind,
-        Syscall::migrate_pages,
-        Syscall::set_mempolicy,
-        Syscall::userfaultfd,
-        Syscall::perf_event_open,
-    ];
 
     let s_isuid: u64 = Mode::S_ISUID.bits().into();
     let s_isgid: u64 = Mode::S_ISGID.bits().into();
@@ -398,7 +404,7 @@ fn syscalls() -> ContainerResult {
     ];
     match Context::init_with_action(Action::Allow) {
         Ok(mut ctx) => {
-            for syscall in disabled_syscalls {
+            for syscall in DISABLED_SYSCALLS {
                 if let Err(err) = ctx.set_action_for_syscall(Action::Errno(0), syscall) {
                     println!("Failed to disable syscall: {:?}. Error: {:?}", syscall, err);
                     return Err(ContainerError::DisableSyscall);
@@ -483,6 +489,7 @@ fn resources(config: &ChildConfig, pid: Pid) -> ContainerResult {
         cg_builder = cg_builder.memory().memory_hard_limit(memory_limit).done();
     }
     if let Some(max_pids) = config.max_pids {
+        println!("Setting max pids to: {:?}", max_pids);
         cg_builder = cg_builder
             .pid()
             .maximum_number_of_processes(cgroups_rs::MaxValue::Value(max_pids))
@@ -569,8 +576,13 @@ fn run() -> ContainerResult {
     Ok(())
 }
 
+fn cleanup() {
+    todo!()
+}
+
 fn main() {
     if let Err(_) = run() {
+        cleanup();
         exit(-1);
     }
 }
