@@ -1,0 +1,261 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>What exactly is a Container? - Building a Container from Scratch in Rust</title>
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html" class="active">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Building a Container from Scratch in Rust</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="what-exactly-is-a-container"><a class="header" href="#what-exactly-is-a-container">What exactly is a Container?</a></h1>
+<p>The concept of containers is rooted in Linux. Check out this <a href="https://www.redhat.com/en/blog/history-containers">RedHat blog</a> about the history of containers. When people talk about containers, they are more or less talking about Linux containers.</p>
+<p>However, the Linux Kernel doesn’t have a native object that represents a “container”. From the perspective of the kernel, containers are just processes. But what makes these processes special?</p>
+<p>The best way to look at the properties of a process in a container is to look at some demos with the help of <code>Docker</code>, a tool that can create and run containers.</p>
+<h3 id="filesystem-isolation"><a class="header" href="#filesystem-isolation">Filesystem Isolation</a></h3>
+<p>Firstly, a process in a container has an isolated view of the filesystem. In the demo below, we created a container based on the <code>ubuntu</code> image.</p>
+<p>If we navigate to the root directory via <code>cd /</code>, we notice that the root filesystem of the process in a container is not the same one as the root filesystem on the host system. Modifying the root filesystem within the container will have no impact on the host system.</p>
+<pre><code class="language-docker">docker run -it ubuntu bash
+cd /
+ls
+# bin  boot  dev  etc  home  lib  media  mnt  opt  proc
+#  root  run  sbin  srv  sys  tmp  usr  var
+
+# host system
+cd /
+ls
+# bin    dev   lib         mnt   opt   run   srv       tmp
+# boot   etc   lost+found  proc  sbin  swapfile  usr
+# cdrom  home  media       root  snap  sys       var
+</code></pre>
+<p>The new root filesystem comes from the <code>ubuntu</code> image. A docker image is an executable file. A docker image is made up of filesystems layered over each other. These layers form the base for a container’s root filesystem.</p>
+<h3 id="pid-isolation"><a class="header" href="#pid-isolation">Pid Isolation</a></h3>
+<p>Processes in a container has an isolated view of other processes running on the host. In the example below, if we perform <code>ps -a -u</code> to list all processes in the container, we only see the process running <code>bash</code> and <code>ps -a -u</code>. However, if we perform <code>ps -a -u</code>, we see a lot more processes.</p>
+<p>Furthermore, in the example below the process perceives its <code>pid</code> as <code>1</code>. However, from the perspective of the host system the process running <code>bash</code> is <code>6098</code>.</p>
+<pre><code class="language-bash">docker run -it ubuntu bash
+ps -a -u
+# USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+# root           1  0.2  0.0   4136  3200 pts/0    Ss   07:19   0:00 bash
+# root           9  0.0  0.0   6412  2432 pts/0    R+   07:19   0:00 ps -a -u
+echo $$
+# 1
+
+# host system
+ps -a -u
+# USER     PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+...
+root       6098  0.0  0.0   4136  3200 pts/0    Ss+  15:19   0:00 bash
+</code></pre>
+<h3 id="user-id-isolation"><a class="header" href="#user-id-isolation">User ID Isolation</a></h3>
+<p>In a container, things like the user ID and group ID are isolated. What this unlocks is that a process can run as a root user inside the container while actually being an unprivileged user on the host.</p>
+<p>In the example below, we enable the <code>user namespace</code> via <code>--userns-remap=default</code>. The process in the container perceives its <code>uid</code> as 0. But if we look at the user corresponding to the process from the host system, the user is in fact <code>165536</code>.</p>
+<pre><code class="language-docker">sudo dockerd --userns-remap=default
+sudo docker run -it --rm busybox /bin/sh
+id
+# uid=0(root) gid=0(root) groups=0(root),10(wheel)
+
+# host system
+ps -a -u
+# USER        PID   %CPU %MEM    VSZ   RSS TTY     STAT  START TIME  COMMAND
+# ...
+# 165536     14154  0.0  0.0   3984  1920 pts/0    Ss+  14:33   0:00 /bin/sh
+</code></pre>
+<h3 id="resource-restriction"><a class="header" href="#resource-restriction">Resource Restriction</a></h3>
+<p>In Docker, you can constrain resources on the container. For example, you can limit the amount of memory the process can take, the number of CPUs the container can run on, etc. Check out <a href="https://docs.docker.com/engine/reference/run/#runtime-constraints-on-resources">Docker’s doc</a> for the full list of resources that can be constrained.</p>
+<p>As an example, here is how you can limit the container to have a memory limit of 128 mb.</p>
+<pre><code class="language-bash">docker run -it --memory 128m ubuntu bash
+</code></pre>
+<h2 id="secret-behind-docker"><a class="header" href="#secret-behind-docker">Secret behind Docker</a></h2>
+<p>So how does Docker achieve all these different forms of isolation and resource restriction? It boils down to the following Linux primitives:</p>
+<ul>
+<li>Namespaces</li>
+<li>Capabilities</li>
+<li>cgroups</li>
+</ul>
+<p>We will cover these in greater detail throughout the blog!</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="preface.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next" href="api.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="preface.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next" href="api.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>
