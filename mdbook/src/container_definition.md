@@ -12,7 +12,7 @@ Firstly, a process in a container has an isolated view of the filesystem. In the
 
 If we navigate to the root directory via `cd /`, we notice that the root filesystem of the process in a container is not the same one as the root filesystem on the host system. Modifying the root filesystem within the container will have no impact on the host system.
 
-```docker
+```bash
 docker run -it ubuntu bash
 cd /
 ls
@@ -57,7 +57,7 @@ In a container, things like the user ID and group ID are isolated. What this unl
 
 In the example below, we enable the `user namespace` via `--userns-remap=default`. The process in the container perceives its `uid` as 0. But if we look at the user corresponding to the process from the host system, the user is in fact `165536`.
 
-```docker
+```bash
 sudo dockerd --userns-remap=default
 sudo docker run -it --rm busybox /bin/sh
 id
@@ -80,9 +80,9 @@ As an example, here is how you can limit the container to have a memory limit of
 docker run -it --memory 128m ubuntu bash
 ```
 
-## Secret behind Docker
+## Secret behind Containers
 
-So how does Docker achieve all these different forms of isolation and resource restriction? It boils down to the following Linux primitives:
+So how does a container provide the isolation properties demonstrated above? It boils down to the following Linux primitives:
 
 - Namespaces
 - Capabilities

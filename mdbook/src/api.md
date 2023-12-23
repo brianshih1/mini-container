@@ -2,7 +2,7 @@
 
 Before we talk about the theory of and implementation behind containers, let’s first look at what we plan to build in this project. Don’t worry if some of these terminologies or terms are confusing, I will try to explain them all in this blog.
 
-### Command
+At the core, the `mini-container` program takes two arguments: an executable program and a directory that points to a root filesystem. It creates a process, sets up the container environment, and executes the executable program in this container.
 
 Here are the arguments and options to execute my toy container.
 

@@ -7,7 +7,7 @@
 
 ---
 
-# Deep Dive into Conatiners
+# Implementing a Container
 - [Higher Level Setup](./higher_level_setup.md)
 - [Isolate Filesystem](./isolate_filesystem.md)
 - [Limit Syscalls](./limit_syscalls.md)
