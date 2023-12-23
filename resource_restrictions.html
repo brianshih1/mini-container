@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html" class="active"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html" class="active"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -143,6 +143,135 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="resource-restrictions"><a class="header" href="#resource-restrictions">Resource Restrictions</a></h1>
+<h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
+<p>We want to limit and isolate resource usage such as CPU, memory, disk I/O, network, etc in a container.</p>
+<h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
+<p><a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">Cgroups</a> is a Linux kernel feature that allows developers to control how much of a given key resource (CPU, memory, etc) a process or a set of processes can access.</p>
+<p>According to the <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">Linux doc</a>, the grouping of processes is provided through a pseudo-filesystem called <code>cgroupfs</code>. A cgroup is a collection of processes bound to a set of limits defined via the cgroup filesystem.</p>
+<p>Each cgroup has a kernel component called a <em>subsystem</em>, also known as a resource controller.</p>
+<p>Different subsystems limit different resources, such as the CPU time and memory available to a cgroup. To create a cgroup, you create a directory inside the <code>cgroup</code> filesystem:</p>
+<pre><code>mkdir /sys/fs/cgroup/cg1
+</code></pre>
+<p>Each file inside the <code>cgroup</code> directory corresponds to a different resource that can be limited. For example, the <code>cgroup</code> below contains files such as <code>memory.max</code> which limits the memory a cgroup can access.</p>
+<pre><code class="language-bash">ls /sys/fs/cgroup/cg1
+# cgroup.controllers      cpuset.cpus.partition  memory.max
+# cgroup.events           cpuset.mems            memory.min
+# cgroup.freeze           cpuset.mems.effective  memory.numa_stat
+# cgroup.kill             cpu.stat               memory.oom.group
+# cgroup.max.depth        cpu.uclamp.max         memory.peak
+# cgroup.max.descendants  cpu.uclamp.min         memory.pressure
+# cgroup.pressure         cpu.weight             memory.reclaim
+# ... many more
+</code></pre>
+<h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
+<p>In this demo (inspired by Michael Kerrisk’s <a href="https://man7.org/conf/ndctechtown2021/cgroups-v2-part-1-intro-NDC-TechTown-2021-Kerrisk.pdf">tech talk</a>), we will create a cgroup and set <code>pids.max</code> to 5 and confirm that the process can only run 5 tasks at max.</p>
+<pre><code class="language-bash">sudo bash
+cd /sys/fs/cgroup/
+# we create a cgroup called foo
+mkdir foo
+
+# add the current process to the created cgroup
+echo $$ &gt; foo/cgroup.procs
+
+# confirm that the current process belongs to the foo cgroup
+cat /proc/$$/cgroup
+# 0::/foo
+
+# set the maximum number of tasks at once
+echo 5 &gt; /sys/fs/cgroup/foo/pids.max
+
+for i in {1..5}; do sleep 1 &amp; done
+# [1] 8379
+# [2] 8380
+# [3] 8381
+# [4] 8382
+# bash: fork: retry: Resource temporarily unavailable
+</code></pre>
+<p>After creating a new <code>cgroup</code> called <code>foo</code> and adding the process into that cgroup, we set <code>pids.max</code> to <code>5</code>. Next, we execute <code>for i in {1..5}; do sleep 1 &amp; done</code> and see that when the process tries to run the 5th <code>sleep 1</code>, it errors out as the process cannot create 5 processes.</p>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<p>There are many resources that we can choose to limit. For my toy container implementation, I will only limit the <code>memory</code> and <code>max_pids</code>. In the implementation, we will use the <a href="https://crates.io/crates/cgroups-rs">cgroup-rs</a> crate, a Rust library for managing cgroups.</p>
+<p>Note that limiting the resources is performed by the parent process after the child process is created. This is because we need the child process’s <code>pid</code> so that we can add it to the <code>cgroup</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn run() -&gt; ContainerResult {
+    ...
+    let child_pid = create_child_process(&amp;config)?;
+    resources(&amp;config, child_pid)?;
+    ...
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The code for limiting resources is simple. We create a new <code>cgroup</code> with the <code>config.hostname</code> as its name. We then write to the corresponding resource’s file before adding the <code>pid</code> to the created <code>cgroup</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn resources(config: &amp;ChildConfig, pid: Pid) -&gt; ContainerResult {
+    println!(&quot;Restricting resource!&quot;);
+    let mut cg_builder = CgroupBuilder::new(&amp;config.hostname);
+    if let Some(memory_limit) = config.memory {
+        println!(&quot;Setting memory limit to: {:?}&quot;, memory_limit);
+
+        cg_builder = cg_builder.memory().memory_hard_limit(memory_limit).done();
+    }
+    if let Some(max_pids) = config.max_pids {
+        cg_builder = cg_builder
+            .pid()
+            .maximum_number_of_processes(cgroups_rs::MaxValue::Value(max_pids))
+            .done();
+    }
+
+    let cg = cg_builder.build(Box::new(V2::new()));
+
+    let pid: u64 = pid.as_raw() as u64;
+
+    if let Err(e) = cg.add_task(CgroupPid::from(pid)) {
+        println!(&quot;Failed to add task to cgroup. Error: {:?}&quot;, e);
+        return Err(ContainerError::CgroupPidErr);
+    };
+
+    Ok(())
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation"><a class="header" href="#testing-the-implementation">Testing the Implementation</a></h3>
+<p>This is the code snippet we will use to test whether limiting the number of pids in a cgroup works. This is basically a Rust implementation of our demo earlier: <code>for i in {1..5}; do sleep 1 &amp; done</code>.</p>
+<pre><pre class="playground"><code class="language-rust">use std::thread;
+use std::time::Duration;
+
+fn main() {
+    for i in 1..=5 {
+        thread::spawn(move || {
+            println!(&quot;Thread {} started&quot;, i);
+            thread::sleep(Duration::from_secs(1));
+            println!(&quot;Thread {} completed&quot;, i);
+        });
+    }
+
+    // Sleep for a while to allow threads to finish.
+    thread::sleep(Duration::from_secs(2));
+}</code></pre></pre>
+<p>When we run the executable, we get a <code>Resource temporarily unavailable</code> message. If we examine the hostname and check <code>/sys/fs/cgroup/mini-JoYUGNc/pids.max</code>, we can see that it’s <code>5</code>. We can also check which <code>cgroup</code> the child process is to verify that it’s added to the <code>cgroup</code> correctly.</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /sleep_test /home/brianshih/alpine 
+		--nproc 5
+# thread 'main' panicked at 'failed to spawn thread: Os 
+# { code: 11, kind: WouldBlock, message: &quot;Resource temporarily unavailable&quot; }
+
+hostname
+# hostname of child process: mini-JoYUGNc
+
+# host system
+cat /sys/fs/cgroup/mini-JoYUGNc/pids.max
+# 5
+
+# pid of child process is 8428
+cat /proc/8428/cgroup
+# 0::/mini-OhMDCDW
+</code></pre>
+<p>Next, we run the same command without the <code>--nproc 5</code> option:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>sudo target/debug/mini-container /sleep_test /home/brianshih/alpine 
+<span class="boring">}</span></code></pre></pre>
+<p>This time, it ran successfully, confirming that our cgroup implementation worked.</p>
+<h3 id="additional-resources"><a class="header" href="#additional-resources">Additional Resources</a></h3>
+<p><a href="https://www.nginx.com/blog/what-are-namespaces-cgroups-how-do-they-work/">Blog: What are Namespaces and cgroups?</a></p>
+<p><a href="https://faun.pub/kubernetes-story-linux-namespaces-and-cgroups-what-are-containers-made-from-d544ac9bd622">Blog: Deep into Containers (Namespace &amp; CGroups)</a></p>
 
                     </main>
 

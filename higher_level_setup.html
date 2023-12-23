@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html" class="active"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html" class="active"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -143,6 +143,154 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="project-overview"><a class="header" href="#project-overview">Project Overview</a></h1>
+<p>Here is the higher-level setup for this project:</p>
+<ul>
+<li>parse the command line argument</li>
+<li>create the child process</li>
+<li>setup the namespaces, capabilities, and syscalls restrictions</li>
+<li>executing the program</li>
+</ul>
+<h3 id="parse-the-command-line-argument"><a class="header" href="#parse-the-command-line-argument">Parse the command line argument</a></h3>
+<p>To parse the command line arguments, we use the <a href="https://crates.io/crates/clap">clap crate</a>. Here is the struct representation of the parsed arguments:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[derive(Parser)]
+struct Cli {
+    /// Command to execute
+    command: String,
+
+    /// Absolute path to new root filesystem
+    root_filesystem_path: String,
+
+    /// Optional pid for child process
+    #[arg(short, long)]
+    pid: Option&lt;u32&gt;,
+
+    /// Memory limit (megabytes)
+    #[arg(short, long)]
+    memory: Option&lt;i64&gt;,
+
+    /// Memory limit (megabytes)
+    #[arg(long)]
+    nproc: Option&lt;i64&gt;,
+
+    /// Memory limit (megabytes)
+    #[arg(short, long)]
+    user: Option&lt;u32&gt;,
+
+    // Add capabilities to the bounding set
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    cap_add: Option&lt;Vec&lt;String&gt;&gt;,
+
+    // Remove capabilities to the bounding set, or all if the String provided is &quot;ALL&quot;
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    cap_drop: Option&lt;Vec&lt;String&gt;&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The entry point of the project is the <code>run</code> method. All we have to do is call <code>Cli::parse()</code> to parse the arguments</p>
+<pre><pre class="playground"><code class="language-rust">fn main() {
+    if let Err(_) = run() {
+        cleanup();
+        exit(-1);
+    }
+}
+
+fn run() -&gt; ContainerResult {
+    let cli = Cli::parse();
+	  ...
+}</code></pre></pre>
+<h3 id="create-the-child-process"><a class="header" href="#create-the-child-process">Create the child process</a></h3>
+<p>Since a container is just a process, we need to create the child process for the container. The function to create the child process is <code>create_child_process</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn run() -&gt; ContainerResult {
+    let cli = Cli::parse();
+
+	  ...
+    let child_pid = create_child_process(&amp;config)?;
+    if let Err(e) = waitpid(child_pid, None) {
+        println!(&quot;Error waiting for pid: {:?}&quot;, e);
+        return Err(ContainerError::WaitPid);
+    };
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>After creating the child process, we don’t want the parent process to terminate until the child process completes. Therefore, we use the <a href="https://linux.die.net/man/2/waitpid">waitpid</a> call to wait until the child process finishes.</p>
+<p>Here is the implementation for <code>create_child_process</code>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Creates a child process with clone and runs the executable file
+// with execve in the child process.
+fn create_child_process(config: &amp;ChildConfig) -&gt; Result&lt;Pid, ContainerError&gt; {
+    let mut flags = CloneFlags::empty();
+    flags.insert(CloneFlags::CLONE_NEWNS);
+    flags.insert(CloneFlags::CLONE_NEWCGROUP);
+    flags.insert(CloneFlags::CLONE_NEWPID);
+    flags.insert(CloneFlags::CLONE_NEWIPC);
+    flags.insert(CloneFlags::CLONE_NEWNET);
+    flags.insert(CloneFlags::CLONE_NEWUTS);
+    let mut stack = [0; STACK_SIZE];
+    let clone_res = unsafe {
+        clone(
+            Box::new(|| match child(config) {
+                Ok(_) =&gt; 0,
+                Err(_) =&gt; -1,
+            }),
+            &amp;mut stack,
+            flags,
+            Some(Signal::SIGCHLD as i32),
+            // If the signal SIGCHLD is ignored, waitpid will hang until the
+            // child exits and then fail with code ECHILD.
+        )
+    };
+
+    match clone_res {
+        Ok(pid) =&gt; {
+            println!(&quot;Child pid: {:?}&quot;, pid);
+            Ok(pid)
+        }
+        Err(_) =&gt; Err(ContainerError::Clone),
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>It uses <code>clone</code> to create the child process. It clones with a bunch of flags such as <code>CLONE_NEWNS</code>, <code>CLONE_NEWPID</code>, etc in order to create the different namespaces (user, mount, pid, etc) necessary for isolation. We will cover these namespaces in more detail later.</p>
+<p>The Linux <a href="https://man7.org/linux/man-pages/man2/clone.2.html">clone</a> method takes a function argument. When the function returns, the child process terminates. The function we pass to clone is the <code>child</code> method whose responsibility is to set up the container environment and execute the user-provided program.</p>
+<h3 id="setup-the-namespaces-capabilities-and-syscalls-restrictions--executing-the-program"><a class="header" href="#setup-the-namespaces-capabilities-and-syscalls-restrictions--executing-the-program">Setup the namespaces, capabilities, and syscalls restrictions &amp; Executing the program</a></h3>
+<p>Here is the implementation of <code>child</code>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// setup the namespaces, capabilities, syscall restrictions before running the executable
+fn child(config: &amp;ChildConfig) -&gt; ContainerResult {
+    set_hostname(config)?;
+    isolate_filesystem(config)?;
+    user_ns(config)?;
+    capabilities(config)?;
+    syscalls()?;
+    match execve::&lt;CString, CString&gt;(&amp;config.exec_path, &amp;config.args, &amp;[]) {
+        Ok(_) =&gt; Ok(()),
+        Err(e) =&gt; {
+            println!(&quot;Failed to execute!: {:?}&quot;, e);
+            Err(ContainerError::Execve)
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Before using <code>execve</code> to execute the user-provided program, we set up the container environment for the execution by isolating the filesystem, setting up the user namespace, granting and taking away capabilities, and restricting syscalls.</p>
+<h3 id="summary"><a class="header" href="#summary">Summary</a></h3>
+<p>To summarize, the project contains these core methods:</p>
+<ul>
+<li><strong>run</strong>: parses the command line arguments. Creates the child process and waits until the child process terminates</li>
+<li><strong>create_child_process</strong>: uses clone to create the child process. Pass in the <code>child</code> as the function argument to <code>clone</code></li>
+<li><strong>child</strong>: sets up the container environment before executing the user-provided program with <code>execve</code></li>
+</ul>
+<p>For the rest of this blog, we will focus on learning how we can set up the container environment for the process. For each component of the container environment, we will break it down into:</p>
+<ul>
+<li>Goal</li>
+<li>Theory</li>
+<li>Demo</li>
+<li>Implementation</li>
+<li>Testing the Implementation</li>
+</ul>
 
                     </main>
 

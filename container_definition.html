@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html" class="active">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html" class="active">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -149,7 +149,7 @@
 <h3 id="filesystem-isolation"><a class="header" href="#filesystem-isolation">Filesystem Isolation</a></h3>
 <p>Firstly, a process in a container has an isolated view of the filesystem. In the demo below, we created a container based on the <code>ubuntu</code> image.</p>
 <p>If we navigate to the root directory via <code>cd /</code>, we notice that the root filesystem of the process in a container is not the same one as the root filesystem on the host system. Modifying the root filesystem within the container will have no impact on the host system.</p>
-<pre><code class="language-docker">docker run -it ubuntu bash
+<pre><code class="language-bash">docker run -it ubuntu bash
 cd /
 ls
 # bin  boot  dev  etc  home  lib  media  mnt  opt  proc
@@ -183,7 +183,7 @@ root       6098  0.0  0.0   4136  3200 pts/0    Ss+  15:19   0:00 bash
 <h3 id="user-id-isolation"><a class="header" href="#user-id-isolation">User ID Isolation</a></h3>
 <p>In a container, things like the user ID and group ID are isolated. What this unlocks is that a process can run as a root user inside the container while actually being an unprivileged user on the host.</p>
 <p>In the example below, we enable the <code>user namespace</code> via <code>--userns-remap=default</code>. The process in the container perceives its <code>uid</code> as 0. But if we look at the user corresponding to the process from the host system, the user is in fact <code>165536</code>.</p>
-<pre><code class="language-docker">sudo dockerd --userns-remap=default
+<pre><code class="language-bash">sudo dockerd --userns-remap=default
 sudo docker run -it --rm busybox /bin/sh
 id
 # uid=0(root) gid=0(root) groups=0(root),10(wheel)
@@ -199,8 +199,8 @@ ps -a -u
 <p>As an example, here is how you can limit the container to have a memory limit of 128 mb.</p>
 <pre><code class="language-bash">docker run -it --memory 128m ubuntu bash
 </code></pre>
-<h2 id="secret-behind-docker"><a class="header" href="#secret-behind-docker">Secret behind Docker</a></h2>
-<p>So how does Docker achieve all these different forms of isolation and resource restriction? It boils down to the following Linux primitives:</p>
+<h2 id="secret-behind-containers"><a class="header" href="#secret-behind-containers">Secret behind Containers</a></h2>
+<p>So how does a container provide the isolation properties demonstrated above? It boils down to the following Linux primitives:</p>
 <ul>
 <li>Namespaces</li>
 <li>Capabilities</li>

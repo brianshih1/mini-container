@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html" class="active"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html" class="active"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -143,6 +143,198 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="limit-syscalls"><a class="header" href="#limit-syscalls">Limit Syscalls</a></h1>
+<h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
+<p>Restrict the number of system calls that the running process can make to protect the host system.</p>
+<h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
+<p>Certain system calls may pose security risks or impact the host system. <a href="https://man7.org/linux/man-pages/man2/seccomp.2.html">Seccomp</a> (Secure Computing Mode) is a Linux feature that allows developers to filter system calls to the kernel. Seccomp operates in two modes:</p>
+<ul>
+<li>Strict: a minimal set of syscalls is allowed</li>
+<li>Filter: allows developers to define custom policies for which syscalls are permitted</li>
+</ul>
+<p>Seccomp filters are expressed as Berkeley Packet Filters (BPF) programs. These filters can be used to allow or deny system calls, as well as conditionally filter on system call arguments.</p>
+<p>For this project, we will be using the following seccomp system calls</p>
+<ul>
+<li><a href="https://man7.org/linux/man-pages/man3/seccomp_init.3.html">seccomp_init</a>: initializes the seccomp filter</li>
+<li><a href="https://man7.org/linux/man-pages/man3/seccomp_rule_add.3.html">seccomp_rule_add</a>: add a new filter rule to the current seccomp filter</li>
+<li><a href="https://man7.org/linux/man-pages/man3/seccomp_load.3.html">seccomp_load</a>: load the current seccomp filter into the kernel</li>
+</ul>
+<p>Each filter in the seccomp filter returns an action, that can be one of:</p>
+<ul>
+<li>SCMP_ACT_KILL: kill the thread</li>
+<li>SCMP_ACT_KILL_PROCESS: kill the process</li>
+<li>SCMP_ACT_TRAP: throw a SIGSYS signal</li>
+<li>SCMP_ACT_ERRNO: return value with the specified error code:</li>
+<li>SCMP_ACT_TRACE: notify the tracer</li>
+<li>SCMP_ACT_LOG: logged</li>
+<li>SCMP_ACT_ALLOW: allowed</li>
+<li>SCMP_ACT_NOTIFY: monitoring process will be notified</li>
+</ul>
+<p>In short, Seccomp allows us to set rules that determine what happens when certain system calls are invoked. Seccomp is a powerful tool. But knowing which system calls to filter out is the tricky part. In this blog, I will focus only on the mechanism of filtering system calls and not discuss which system calls are dangerous. For an explanation of that, I suggest <a href="https://blog.lizzie.io/linux-containers-in-500-loc.html#org8504d16">Lizzie’s blog</a> or <a href="https://github.com/docker/docs/blob/1253f14f6dd83df2cf9965182de118e5886c1b9e/content/engine/security/seccomp.md">Docker’s documentation</a>.</p>
+<h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
+<p>For this project, we will be using the <a href="https://docs.rs/syscallz/latest/syscallz/">syscallz crate</a>, a seccomp library for Rust.</p>
+<p>In the following example, we will try and limit the <code>getpid</code> system call. In the library, <code>Context::init_with_action</code>, <code>ctx.set_action_for_syscall</code> and <code>ctx.load()</code> are wrappers around <code>seccomp_init</code>, <code>seccomp_rule_add</code>, and <code>seccomp_load</code>.</p>
+<pre><pre class="playground"><code class="language-rust">use libc::getpid;
+use syscallz::{Action, Context, Syscall};
+
+fn main() {
+    println!(&quot;pid (first attempt):, {}&quot;, unsafe { getpid() });
+
+    match Context::init_with_action(Action::Allow) {
+        Ok(mut ctx) =&gt; {
+            ctx.set_action_for_syscall(Action::Errno(100), Syscall::getpid)
+                .unwrap();
+            ctx.load().unwrap();
+        }
+        Err(e) =&gt; {
+            println!(&quot;Failed to init with action: {:?}&quot;, e);
+        }
+    }
+
+    println!(&quot;pid (second attempt):, {}&quot;, unsafe { getpid() });
+}</code></pre></pre>
+<p>Compiling and executing the code above yields the following, where <code>-100</code> is the corresponding error code.</p>
+<pre><code class="language-docker">pid (first attempt):, 6613
+pid (second attempt):, -100
+</code></pre>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<p>For my project, I disabled the same set of syscalls that <a href="https://blog.lizzie.io/linux-containers-in-500-loc.html#org8504d16">Lizzie’s implementation</a> of container disables. Here is the implementation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>const DISABLED_SYSCALLS: [Syscall; 9] = [
+    Syscall::keyctl,
+    Syscall::add_key,
+    Syscall::request_key,
+    Syscall::ptrace,
+    Syscall::mbind,
+    Syscall::migrate_pages,
+    Syscall::set_mempolicy,
+    Syscall::userfaultfd,
+    Syscall::perf_event_open,
+];
+
+fn syscalls() -&gt; ContainerResult {
+    println!(&quot;Disabling syscalls!&quot;);
+
+    let s_isuid: u64 = Mode::S_ISUID.bits().into();
+    let s_isgid: u64 = Mode::S_ISGID.bits().into();
+    let clone_newuser = CloneFlags::CLONE_NEWUSER.bits() as u64;
+
+    // Each tuple: (SysCall, argument_idx, value). 0 would be the first argument index.
+    let conditional_syscalls = [
+        (Syscall::fchmod, 1, s_isuid),
+        (Syscall::fchmod, 1, s_isgid),
+        (Syscall::fchmodat, 2, s_isuid),
+        (Syscall::fchmodat, 2, s_isgid),
+        (Syscall::unshare, 0, clone_newuser),
+        (Syscall::clone, 0, clone_newuser),
+        // TODO: ioctl causes an error when running /bin/ash somehow...
+        // (Syscall::ioctl, 1, TIOCSTI),
+    ];
+    match Context::init_with_action(Action::Allow) {
+        Ok(mut ctx) =&gt; {
+            for syscall in DISABLED_SYSCALLS {
+                if let Err(err) = ctx.set_action_for_syscall(Action::Errno(0), syscall) {
+                    println!(&quot;Failed to disable syscall: {:?}. Error: {:?}&quot;, syscall, err);
+                    return Err(ContainerError::DisableSyscall);
+                };
+            }
+
+            for (syscall, arg_idx, bit) in conditional_syscalls {
+                if let Err(err) = ctx.set_rule_for_syscall(
+                    Action::Errno(1000),
+                    syscall,
+                    &amp;[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
+                ) {
+                    println!(&quot;Failed to disable syscall: {:?}. Error: {:?}&quot;, syscall, err);
+                    return Err(ContainerError::DisableSyscall);
+                }
+            }
+
+            if let Err(err) = ctx.load() {
+                println!(&quot;Failed to load syscall disabling: {:?}&quot;, err);
+                return Err(ContainerError::DisableSyscall);
+            };
+        }
+        Err(err) =&gt; {
+            println!(&quot;Failed to open seccomp context: {:?}&quot;, err);
+            return Err(ContainerError::DisableSyscall);
+        }
+    }
+
+    println!(&quot;Finished disabling syscalls!&quot;);
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p><code>seccomp_rule_add_array</code> allows developers to filter a syscall based on specific argument values by providing a comparator. Here is the code I used to perform conditional filters:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>ctx.set_rule_for_syscall(
+    Action::Errno(1000),
+    syscall,
+    &amp;[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
+)
+<span class="boring">}</span></code></pre></pre>
+<p>For example, to error our when <code>unshare</code> is invoked when it contains the <code>clone_newuser</code> bit, we can provide a <code>Comparator</code> to <code>set_rule_for_syscall</code> like this:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let clone_newuser = CloneFlags::CLONE_NEWUSER.bits() as u64;
+ctx.set_rule_for_syscall(
+    Action::Errno(1000),
+    Syscall::unshare,
+    &amp;[Comparator::new(0, Cmp::MaskedEq, clone_newuser, Some(clone_newuser))],
+);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation"><a class="header" href="#testing-the-implementation">Testing the Implementation</a></h3>
+<p>Now, let’s test whether our implementation works. In this test, we will confirm that performing <code>unshare</code> works without the <code>CLONE_NEWUSER</code> flag but fails with the <code>CLONE_NEWUSER</code> flag.</p>
+<p>First, let’s confirm that <code>unshare</code> works when there are no flags set. Here is the <code>unshare_test</code> program:</p>
+<pre><code class="language-docker">use nix::sched::{unshare, CloneFlags};
+
+fn main() {
+    match unshare(CloneFlags::empty()) {
+        Ok(_) =&gt; println!(&quot;Unshared success!&quot;),
+        Err(e) =&gt; println!(&quot;Error: {:?}&quot;, e),
+    }
+}
+</code></pre>
+<p>After compiling the binary for <code>unshare_test</code>, we need to copy the executable into the <code>alpine</code> directory before running the program in the container.</p>
+<pre><code class="language-docker"># inside the unshare_test repo
+RUSTFLAGS=&quot;-C target-feature=+crt-static&quot; cargo build --target=&quot;aarch64-unknown-linux-gnu&quot;
+cp target/aarch64-unknown-linux-gnu/debug/unshare_test /home/brianshih/alpine
+
+# navigate to mini-container repo
+sudo target/debug/mini-container /unshare_test /home/brianshih/alpine
+# Unshared Success!
+</code></pre>
+<p>Based on the output of running the executable in the container environment, we’ve confirmed that <code>unshare</code> works when there are no flags set.</p>
+<p>Now, let’s see what will happen if performing <code>unshare</code> with the <code>CLONE_NEWUSER</code> flag works with the following code:</p>
+<pre><code class="language-docker">use nix::sched::{unshare, CloneFlags};
+
+fn main() {
+    match unshare(CloneFlags::CLONE_NEWUSER) {
+        Ok(_) =&gt; println!(&quot;Unshared success!&quot;),
+        Err(e) =&gt; println!(&quot;Error: {:?}&quot;, e),
+    }
+}
+</code></pre>
+<p>After compiling and copying the executable to the target root filesystem, I ran the executable in the container environment:</p>
+<pre><code class="language-docker">sudo target/debug/mini-container /unshare_test /home/brianshih/alpine
+# Error: UnknownErrno
+</code></pre>
+<p>Based on the output, we have confirmed that it works.</p>
+<p>To check which <code>Seccomp</code> mode and how many <code>seccomp filters</code> there are, you can perform <code>grep Seccomp /proc/{pid}/status</code> like follows:</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /bin/ash /home/brianshih/alpine
+# ...
+# Child pid: Pid(6381)
+
+# Host system
+grep Seccomp /proc/6381/status
+# Seccomp:	2
+# Seccomp_filters:	1
+</code></pre>
+<p>Here, we can see that <code>Seccomp</code> is in the filter mode and there is one filter since our code only initializes and loads one filter.</p>
+<h3 id="additional-resources"><a class="header" href="#additional-resources">Additional Resources</a></h3>
+<p><a href="https://wiki.mozilla.org/Security/Sandbox/Seccomp">Intro to Seccomp and Seccomp-bpf</a></p>
+<p><a href="https://wiki.mozilla.org/Security/Sandbox/Seccomp">Mozilla wiki - Seccomp</a></p>
 
                     </main>
 

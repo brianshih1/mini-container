@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html" class="active"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html" class="active"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -142,7 +142,166 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="resource-restrictions"><a class="header" href="#resource-restrictions">Resource Restrictions</a></h1>
+                        <h1 id="user-namespace"><a class="header" href="#user-namespace">User Namespace</a></h1>
+<h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
+<p>The best way to prevent privilege-escalation attacks from within a container is to run the container’s executable as an unprivileged user. However, some applications require the process to run as a <code>root</code> user. Therefore, our goal is to set up an environment such that the user within the container is privileged but unprivileged to the host system.</p>
+<h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
+<p>User Namespaces isolate security-related identifiers. According to <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html">Linux’s doc</a>, “a process’s user and group IDs can be different inside and outside a namespace. In particular, a process can have a normal unprivileged user ID outside a user namespace while at the same time having a user ID of 0 inside the namespace”.</p>
+<p>Furthermore, user namespaces are nested. Apart from the root namespace, each namespace has a parent namespace, which is the user namespace of the process that created the user namespace via a call to <code>unshare</code> or <code>clone</code> with the <code>CLONE_NEWUSER</code> flag.</p>
+<p>The user namespace is what enables a container to run as a <code>root</code> user within a container but have unprivileged access outside the container, which prevents privilege-escalation attacks.</p>
+<p><strong>User mappings</strong></p>
+<p>When a user namespace is created, it starts without a mapping of User IDs to the parent user namespace. The <code>/proc/pid/uid_map</code>, which resides in the parent user namespace, maps the User IDs inside the parent user namespace to the User IDs inside the child user namespace.</p>
+<p>Each line in the <code>uid_map</code> takes the form:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>ID-in-child-ns   ID-in-parent-ns   length
+<span class="boring">}</span></code></pre></pre>
+<p><code>ID-in-child-ns</code>,  <code>ID-in-parent-ns</code>, and <code>length</code> specifies that a range of user IDs of <code>length</code> starting from <code>ID-in-child-ns</code> are mapped to a range of user IDs of <code>length</code> in the parent user namespace starting with <code>ID-in-parent-ns</code>.</p>
+<p>For example, a line of <code>0 1000 1</code> means that the user with <code>User ID 0</code> in the child user namespace maps to the user with <code>User ID 1000</code>.</p>
+<h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
+<p>In the demo below, we first create a user namespace with the <code>-U</code> flag. According to the <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html">Linux doc</a>, an unmapped User ID is converted to the overflow user ID which is <code>65534</code>. This is why the <code>uid=65534</code>. However, when we check the <code>User ID</code> for the process via <code>ps -o 'pid uid user command' -a</code>, we can see that the UID is <code>1000</code>, the same User as the parent process’s user.</p>
+<p>After retrieving the <code>pid</code> of the child process via <code>echo $$</code>, we write <code>0 1000 1</code> into the <code>uid_map</code> of the parent user namespace. We then check the <code>user ID</code> of the child process and now see <code>0</code>.</p>
+<p>Even though the User ID of the child process is <code>0</code>, if we check the <code>uid</code> from the parent user namespace, it’s still 1000. We have successfully mapped the original user ID of <code>1000</code> to <code>0</code> in the new user namespace.</p>
+<pre><code class="language-bash">id
+# uid=1000(brianshih) gid=1000(brianshih) groups=1000(brianshih) ...
+unshare -U
+id
+# uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+echo $$
+# 10087
+
+# host system
+ps -o 'pid uid user command' -a
+# PID   UID USER     COMMAND
+10087  1000 briansh+ -bash
+echo '0 1000 1' &gt; /proc/10087/uid_map
+
+# in the child process
+id
+# uid=0(root) gid=65534(nogroup) groups=65534(nogroup)
+
+# host system
+ps -o 'pid uid user command' -a
+# PID    UID  USER     COMMAND
+# 10087  1000 briansh+ -bash
+</code></pre>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<p>The implementation is split into two portions:</p>
+<ul>
+<li><code>user_ns</code>: creating a new user namespace in the child process</li>
+<li><code>handle_child_uid_map</code>: updating to the <code>uid_map</code> in the parent process.</li>
+</ul>
+<p>We can see that in the <code>run</code> method below, we <code>handle_child_uid_map</code> method is run after <code>create_child_process</code>. This is because to write to the <code>uid_map</code>, the parent process needs the newly created process’s <code>pid</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn run() -&gt; ContainerResult {
+    ...
+
+    let child_pid = create_child_process(&amp;config)?;
+
+    handle_child_uid_map(child_pid, parent_socket.as_raw_fd(), config.user_id.clone())?;
+    ...
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the code to create a new user namespace with <code>unshare</code>. After creating the new user namespace, the child process notifies the parent process that the child process has created a new user namespace. Next, the child process waits until the parent updates the <code>uid_map</code> before using <code>setresuid</code> to set the new <code>user_id</code>, which is likely <code>0</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn user_ns(config: &amp;ChildConfig) -&gt; ContainerResult {
+    if let Err(e) = unshare(CloneFlags::CLONE_NEWUSER) {
+        println!(&quot;Failed to unshare with new user namespace: {:?}&quot;, e);
+        return Err(ContainerError::UnshareNewUser);
+    }
+
+    // Notifies the parent process that the child process has created a new user namespace
+    socket_send(config.socket_fd)?;
+
+    // Wait for the parent process to update the uid_map before setting the uid
+
+    socket_recv(config.socket_fd)?;
+
+    if let Some(user_id) = config.user_id {
+        println!(&quot;Setting UID to: {:?}&quot;, config.user_id);
+        if let Err(e) = setresuid(
+            Uid::from_raw(user_id),
+            Uid::from_raw(user_id),
+            Uid::from_raw(user_id),
+        ) {
+            println!(&quot;Failed to set uid. Error: {:?}&quot;, e);
+            return Err(ContainerError::SetResuid);
+        };
+    }
+
+    Ok(())
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the code for how the parent updates the <code>uid_map</code>. It first waits for the user to create a user namespace via <code>socket_recv</code>. It then writes to the <code>uid_map</code> file and <code>gid_map</code> file. Finally, it uses <code>socket_send</code> to notify the child that the <code>uid_map</code> is updated.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn handle_child_uid_map(pid: Pid, fd: i32, user_id: Option&lt;u32&gt;) -&gt; ContainerResult {
+    // Wait for the user to create a user namespace
+    socket_recv(fd)?;
+
+    let user_id = match user_id {
+        Some(id) =&gt; id,
+        None =&gt; 0, // default to run as root if no user ID is provided
+    };
+
+    println!(&quot;Updating uid_map&quot;);
+    match File::create(format!(&quot;/proc/{}/{}&quot;, pid.as_raw(), &quot;uid_map&quot;)) {
+        Ok(mut uid_map) =&gt; {
+            if let Err(e) = uid_map.write_all(format!(&quot;0 {} {}&quot;, 1000, 1000).as_bytes()) {
+                println!(&quot;Failed to write to uid_map. Error: {:?}&quot;, e);
+                return Err(ContainerError::UidMap);
+            }
+        }
+        Err(e) =&gt; {
+            println!(&quot;Failed to create uid_map. Error: {:?}&quot;, e);
+            return Err(ContainerError::UidMap);
+        }
+    }
+
+    match File::create(format!(&quot;/proc/{}/{}&quot;, pid.as_raw(), &quot;gid_map&quot;)) {
+        Ok(mut uid_map) =&gt; {
+            if let Err(e) = uid_map.write_all(format!(&quot;0 {} {}&quot;, 1000, 1000).as_bytes()) {
+                println!(&quot;Failed to write to uid_map. Error: {:?}&quot;, e);
+                return Err(ContainerError::UidMap);
+            }
+        }
+        Err(e) =&gt; {
+            println!(&quot;Failed to create uid_map. Error: {:?}&quot;, e);
+            return Err(ContainerError::UidMap);
+        }
+    }
+
+    println!(&quot;Finished updating uid_map. Notifying child process&quot;);
+
+    // Notify the user that the uid_map is updated
+    socket_send(fd)?;
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation"><a class="header" href="#testing-the-implementation">Testing the Implementation</a></h3>
+<p>We create the container environment and set the new user ID to 0 via <code>--user 0</code>. We then confirm that <code>id</code> inside the container is <code>0</code>.</p>
+<p>In the host system, we confirm that the process used to run the executable, <code>/bin/ash</code> has a UID of <code>1000</code>. This confirms that the <code>uid_mapping</code> worked.</p>
+<pre><code class="language-bash">id
+# uid=1000(brianshih) ...
+sudo target/debug/mini-container /bin/ash /home/brianshih/alpine --user 0
+id
+# uid=0(root)
+
+# host system
+ps -o 'pid uid user command' -a
+
+# PID    UID  USER     COMMAND
+# 10074  0    root     target/debug/mini-container /bin/ash /home/brianshih/alpi
+# 10075  1000 briansh+ /bin/ash
+</code></pre>
+<h3 id="additional-resources"><a class="header" href="#additional-resources">Additional Resources</a></h3>
+<ul>
+<li><a href="https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/namespaces/user-namespace">Blog about docker security - user namespace</a></li>
+<li><a href="https://lwn.net/Articles/532593/">Namespaces in operation, part 5: User namespaces</a></li>
+<li><a href="https://docs.docker.com/engine/security/userns-remap/">Docker blog - Isolate containers with a user namespace</a></li>
+<li><a href="https://dockerlabs.collabnix.com/advanced/security/userns/">Demo of how user namespace works with Docker</a></li>
+</ul>
 
                     </main>
 

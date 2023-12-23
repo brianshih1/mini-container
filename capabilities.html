@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html" class="active"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html" class="active"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -143,6 +143,275 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="capabilities"><a class="header" href="#capabilities">Capabilities</a></h1>
+<h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
+<p>We want to granularly control and limit the privileges of processes within a container.</p>
+<h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
+<p>Traditionally, processes run with either a full set of privileges granted by the root user or with a limited set of privileges granted by the process’s user and groups.</p>
+<p>However, sometimes a program needs to be run by an unprivileged user but be able to make privileged calls. In that case, the <a href="https://www.redhat.com/sysadmin/suid-sgid-sticky-bit">suid bit</a> would be set on the file, which will cause the file to be executed by the user who owns the file. This makes the program susceptible to privilege escalation attacks.</p>
+<p>Linux Capabilities are introduced as a mechanism that allows a process to perform privileged operations without being granted superuser access. Rather than a single privilege, the superuser privilege is divided into distinct units known as capabilities.</p>
+<p><strong>Rules of Capabilities</strong></p>
+<p>In Linux, both processes and files (executables) can have capabilities. So what capabilities are granted when a file is executed by a process? For that, we need to first introduce the concept of capabilities set.</p>
+<p>Each process stores 5 different sets of capabilities (based on the <a href="https://www.notion.so/Capabilities-04f91e967ee9426eb354611b98364ede?pvs=21">“Thread capability sets” section in the Linux doc</a>):</p>
+<ul>
+<li><strong>Effective</strong>: The kernel will run permission checks against effective capabilities. If the capability for a privileged operation is not set, a permission error will be thrown.</li>
+<li><strong>Permitted</strong>: superset for the effective capabilities. The process can transition it to the effective set dynamically.</li>
+<li><strong>Inheritable</strong>: capabilities inside the inheritable set will be added to the permitted set when a program is executed via the <code>execve</code> syscall</li>
+<li><strong>Bounding</strong>: the superset of all the capabilities. If a capability is not inside the bounded set, it is not allowed</li>
+<li><strong>Ambient</strong>: a set of capabilities preserved across an execve call that is not privileged. No capability can be ambient if it is not both permitted and inheritable.</li>
+</ul>
+<p>Here is a screenshot from the Linux <a href="https://man7.org/linux/man-pages/man7/capabilities.7.html">doc</a> about how the different Linux capabilities will transform across <code>execve</code> calls:</p>
+<p><img src="https://prod-files-secure.s3.us-west-2.amazonaws.com/552ab37c-e9e7-4e4e-b079-a27f36afc8b3/c39cf7c4-dd28-402d-a64d-fbbc98ebfcfa/Screenshot_2023-12-20_at_1.32.44_AM.png" alt="Screenshot 2023-12-20 at 1.32.44 AM.png" /></p>
+<p>If a user wants to execute a file that needs capability <code>X</code>, the user needs X to be inside <code>P'(effective)</code>. In the 2 demos below, we will demonstrate how we can achieve that for different types of files.</p>
+<h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
+<p><strong>Demo 1: Gaining Capabilities from Executables</strong></p>
+<p>One of the Linux Capabilities is <code>CAP_NET_BIND_SERVICE</code>, which determines whether a process can bind a socket to a Internet domain privileged ports (port number less than 1024).</p>
+<p>To start off, I’ve created a Rust project with the following code. All this code snippet does is that it tries to create a <code>TcpListener</code> and bind it to a privileged address (80).</p>
+<pre><pre class="playground"><code class="language-rust">use std::net::TcpListener;
+
+fn main() {
+    let listener = TcpListener::bind(&quot;127.0.0.1:80&quot;).unwrap();
+	  println!(&quot;TcpListner bound to 127.0.0.1:80. Accepting incoming connection&quot;):
+		listener.accept();
+}</code></pre></pre>
+<p>When we run this code, we will get this error:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>Error: Os { code: 13, kind: PermissionDenied, message: &quot;Permission denied&quot; }
+<span class="boring">}</span></code></pre></pre>
+<p>This is because normal processes have 0 capabilities. To verify this, we can look at <code>/proc/$$/status</code> to see that the <code>CAP_NET_BIND_SERVICE</code> bit is not in <code>CapEff</code>.</p>
+<pre><code class="language-bash">grep Cap /proc/$$/status
+# CapInh:	0000000000000000
+# CapPrm:	0000000000000000
+# CapEff:	0000000000000000
+# CapBnd:	000001ffffffffff
+# CapAmb:	0000000000000000
+</code></pre>
+<p>Now, let’s think about how we can grant capability to the process running the file.</p>
+<p>Firstly, the file is clearly not capability-aware. Capability aware programs are programs that understand and manipulate capabilities through calls to <a href="https://man7.org/linux/man-pages/man3/libcap.3.html">libcap</a> syscalls.</p>
+<p>Therefore, in order for the <code>CAP_NET_BIND_SERVICE</code> capability to be inside the thread’s effective capability set after the <code>execve</code> call, one way is to add the capability to the file’s effective set and permitted set.</p>
+<pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
+P'(permitted) = (P(inheritable) &amp; F(inheritable)) | (F(permitted) &amp; cap_bset) | P'(ambient)
+</code></pre>
+<p>If <code>F(effective)</code> is valid, we can perform the following algebra:</p>
+<pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
+</code></pre>
+<p>⇒  <code>P'(effective) = P'(permitted)</code></p>
+<p>⇒ <code>P'(effective) = (F(permitted) &amp; cap_bset)</code></p>
+<p>Since the capability is inside <code>F(effective)</code> and <code>F(premitted)</code>, it will also be inside <code>P'(effective)</code>.</p>
+<p>Now let’s try setting the <code>CAP_NET_BIND_SERVICE</code> to the file and re-run it.</p>
+<pre><code class="language-bash">sudo setcap 'cap_net_bind_service=+ep' target/debug/hello_world
+getcap target/debug/hello_world
+# target/debug/hello_world cap_net_bind_service=ep
+target/debug/hello_world
+# TcpListener bound to 127.0.0.1:80. Accepting incoming connection
+</code></pre>
+<p>To grant a capability, we will use the <a href="https://man7.org/linux/man-pages/man8/setcap.8.html">setcap</a> syscall. To verify that the capability is set, we use the <a href="https://man7.org/linux/man-pages/man8/getcap.8.html">getcap</a> syscall. After setting the capability, we can bound the TcpListener to port 80.</p>
+<p><strong>Demo 2: Capability-aware files</strong></p>
+<p>Ideally, we would like to create an environment that doesn’t require giving the process root user privileges or granting the file capabilities.</p>
+<p>Let’s look at this equation again:</p>
+<pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
+</code></pre>
+<p>If we don’t set the <code>F(effective)</code> bit, then we need to ensure that <code>P'(ambient)</code> contains the capability bit. To do that, we need to create a capability-aware file.  Capability aware files can use the <a href="https://man7.org/linux/man-pages/man2/prctl.2.html">prctl</a> calls to add capabilities to capability sets.</p>
+<p>For example, <code>prctl</code> with arguments of <code>PR_CAP_AMBIENT</code> <code>PR_CAP_AMBIENT_RAISE</code> can add capabilities to the ambient set. According to prctl’s Linux doc, <code>PR_CAP_AMBIENT_RAISE</code> adds the capability specified in arg3 to the ambient set and “the specified capability must already be present in both the permitted and the inheritable sets of the process”.</p>
+<p>As a result, we need to add the capability to the inheritable set of the thread before adding it to the ambient set of the thread. We will add the capability to <code>F(permitted)</code> manually since I can’t seem to add it with <code>prctl</code> directly (I’m still going through the docs to find out why this is happening!).</p>
+<p>Here is the <code>set-ambient</code> program (inspired by this <a href="https://blog.container-solutions.com/linux-capabilities-in-practice">blog</a>) to do that:</p>
+<pre><pre class="playground"><code class="language-rust">use std::{env, ffi::CString};
+
+use nix::unistd::execve;
+
+fn set_ambient() {
+    caps::raise(
+        None,
+        caps::CapSet::Inheritable,
+        caps::Capability::CAP_NET_BIND_SERVICE,
+    )
+    .unwrap();
+
+    caps::raise(
+        None,
+        caps::CapSet::Ambient,
+        caps::Capability::CAP_NET_BIND_SERVICE,
+    )
+    .unwrap();
+}
+
+fn main() {
+    let args: Vec&lt;String&gt; = env::args().collect();
+    set_ambient();
+
+    println!(&quot;CAP_NET_BIND_SERVICE is in ambient capabilities. Executing file.&quot;);
+    if let Err(e) = execve::&lt;CString, CString&gt;(&amp;CString::new(args[1].clone()).unwrap(), &amp;[], &amp;[]) {
+        println!(&quot;Failed to execve: {:?}&quot;, e);
+    }
+}</code></pre></pre>
+<p>We use the <a href="https://crates.io/crates/caps">caps crate</a> to set the capabilities. The call <code>caps::raise(None, Ambient, CAP_NET_BIND_SERVICE)</code> is a wrapper around the Linux call <code>prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, NET_BIND_SERVICE)</code>.</p>
+<p>As specified earlier, the capability must be present in both the permitted and the inheritable sets of the process. Therefore, we use <code>sudo setcap</code> to add the capability to the permitted set of the file.</p>
+<p>After setting the capability bit for <code>NET_BIND_SERVICE</code> to the permission capability set of the file, let’s run <code>/bin/bash</code> with the <code>set-ambient</code> program. We can check the capability sets of the process via <code>grep Cap /proc/$$/status</code> and see that the effective bits for the process is <code>0000000000000400</code>. Finally, we can use <code>capsh --decode</code> to confirm that <code>cap_net_bind_service</code> is in the process’s effective set.</p>
+<pre><code class="language-bash">sudo setcap cap_net_bind_service+p target/debug/set-ambient
+target/debug/set-ambient /bin/bash
+# CAP_NET_BIND_SERVICE is in ambient capabilities. Executing file.
+grep Cap /proc/$$/status
+# CapInh:	0000000000000400
+# CapPrm:	0000000000000400
+# CapEff:	0000000000000400
+# CapBnd:	000001ffffffffff
+# CapAmb:	0000000000000400
+capsh --decode=0000000000000400
+# 0x0000000000000400=cap_net_bind_service
+</code></pre>
+<p>Finally, we can run the file with the <code>TcpListener</code> again and this time, we can bound the listener to port 80.</p>
+<pre><code class="language-bash">target/debug/set-ambient ../tcp_example/target/debug/tcp_example
+# TcpListener bound to 127.0.0.1:80. Accepting incoming connection
+</code></pre>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<p>My implementation takes in a list of capabilities to add and a list of capabilities to drop. If <code>ALL</code> is specified in <code>cap-drop</code>, then all capabilities are dropped.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
+	--cap-drop ALL 
+	--cap-add NET_BIND_SERVICE CAP_SETUID
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the pseudocode for the implementation:</p>
+<ul>
+<li>for each capabilities to drop, drop them. If the capability specified is <code>ALL</code>, then loop through any capabilities in the bounding set unless it’s inside the capabilities to add</li>
+<li>loop through the capabilities to add and add the capability set to the inheritable set and the ambient set.</li>
+</ul>
+<p>Here is the actual code:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>static CAPABILITIES: phf::Map&lt;&amp;'static str, Capability&gt; = phf_map! {
+    &quot;NET_BIND_SERVICE&quot; =&gt; caps::Capability::CAP_NET_BIND_SERVICE,
+    &quot;SETUID&quot; =&gt; caps::Capability::CAP_SETUID,
+    &quot;CAP_SYS_TIME&quot; =&gt; caps::Capability::CAP_SYS_TIME,
+};
+
+fn capabilities(config: &amp;ChildConfig) -&gt; ContainerResult {
+    // compute the list of capabilities to add
+    let caps_add: Vec&lt;Capability&gt; = match &amp;config.cap_add {
+        Some(cap_add) =&gt; {
+            let mut res = vec![];
+            for c in cap_add.iter() {
+                match CAPABILITIES.get(c) {
+                    Some(c) =&gt; {
+                        res.push(c.clone());
+                    }
+                    None =&gt; {
+                        return Err(ContainerError::CapabilityAdd);
+                    }
+                }
+            }
+            res
+        }
+        None =&gt; vec![],
+    };
+
+    // if ALL is inside the capabilities to drop, then drop all capabilities except
+    // for the ones inside capabilities to add
+    if let Some(caps) = &amp;config.cap_drop {
+        if caps.contains(&amp;String::from(&quot;ALL&quot;)) {
+            let bounding_caps = caps::read(None, caps::CapSet::Bounding).unwrap();
+            for cap in bounding_caps.iter() {
+                if !caps_add.contains(cap) {
+                    if let Err(e) = caps::drop(None, caps::CapSet::Bounding, *cap) {
+                        return Err(ContainerError::CapabilityDrop);
+                    }
+                }
+            }
+        } else {
+            for c in caps.iter() {
+                match CAPABILITIES.get(c) {
+                    Some(c) =&gt; {
+                        if let Err(e) = caps::drop(None, caps::CapSet::Bounding, *c) {
+                            return Err(ContainerError::CapabilityDrop);
+                        }
+                        if let Err(e) = caps::drop(None, caps::CapSet::Inheritable, *c) {
+                            return Err(ContainerError::CapabilityDrop);
+                        }
+                    }
+                    None =&gt; {
+                        return Err(ContainerError::CapabilityDrop);
+                    }
+                }
+            }
+        }
+    }
+
+    for cap in caps_add.iter() {
+        if let Err(e) = caps::raise(None, caps::CapSet::Inheritable, *cap) {
+            return Err(ContainerError::CapabilityAdd);
+        }
+        if let Err(e) = caps::raise(None, caps::CapSet::Ambient, *cap) {
+            return Err(ContainerError::CapabilityAdd);
+        }
+    }
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation"><a class="header" href="#testing-the-implementation">Testing the Implementation</a></h3>
+<p>Let’s first confirm that dropping all capabilities and adding <code>NET_BIND_SERVICE</code> works.</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
+	--cap-drop ALL 
+	--cap-add NET_BIND_SERVICE
+# Child pid: Pid(6517)
+# ...
+
+# host system
+grep Cap /proc/6517/status
+# CapInh:	0000000000000400
+# CapPrm:	0000000000000400
+# CapEff:	0000000000000400
+# CapBnd:	000001ffffffffff
+# CapAmb:	0000000000000400
+capsh --decode=0000000000000400
+# 0x0000000000000400=cap_net_bind_service
+</code></pre>
+<p>Next, I built a Rust program with this code. All it does is that it prints out the capability sets of the process and runs <code>setresuid</code>, which is granted if the <code>SETUID</code> capability is set.</p>
+<pre><pre class="playground"><code class="language-rust">use nix::unistd::{setresuid, Uid};
+
+fn main() {
+    println!(&quot;Effective {:?}&quot;, caps::read(None, caps::CapSet::Effective));
+    println!(&quot;Bounding {:?}&quot;, caps::read(None, caps::CapSet::Bounding));
+    println!(
+        &quot;Inherited {:?}&quot;,
+        caps::read(None, caps::CapSet::Inheritable)
+    );
+    println!(&quot;Permitted {:?}&quot;, caps::read(None, caps::CapSet::Permitted));
+    println!(&quot;Ambient {:?}&quot;, caps::read(None, caps::CapSet::Ambient));
+
+    if let Err(e) = setresuid(Uid::from_raw(10), Uid::from_raw(10), Uid::from_raw(10)) {
+        println!(&quot;Failed to setuid: {:?}&quot;, e);
+    }
+    println!(&quot;Finished&quot;);
+}</code></pre></pre>
+<p>Next, let’s compile it and copy it to the alpine directory. Then we run the program in the container. We get an <code>EPERM</code> error. If we look at the logged lines, we can see that <code>CAP_SETUID</code> is not in the effective set of the process.</p>
+<pre><code class="language-bash"># compile it
+RUSTFLAGS=&quot;-C target-feature=+crt-static&quot; cargo build --target=&quot;aarch64-unknown-linux-gnu&quot;
+# copy it to the alpine directory
+cp target/aarch64-unknown-linux-gnu/debug/setuid_example /home/brianshih/alpine
+sudo target/debug/mini-container /setuid_example /home/brianshih/alpine
+# Effective Ok({})
+# Bounding Ok({CAP_SETGID, CAP_AUDIT_WRITE, CAP_SYS_RESOURCE, CAP_SETFCAP, CAP_BLOCK_SUSPEND, CAP_SYS_TTY_CONFIG, CAP_AUDIT_CONTROL, CAP_SYS_NICE, CAP_CHOWN, CAP_LEASE, CAP_MAC_OVERRIDE, CAP_FOWNER, CAP_BPF, CAP_SYS_BOOT, CAP_WAKE_ALARM, CAP_NET_BIND_SERVICE, CAP_IPC_OWNER, CAP_NET_BROADCAST, CAP_PERFMON, CAP_FSETID, CAP_SYS_ADMIN, CAP_SYSLOG, CAP_LINUX_IMMUTABLE, CAP_KILL, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SYS_CHROOT, CAP_SYS_PACCT, CAP_SYS_RAWIO, CAP_SETUID, CAP_NET_RAW, CAP_AUDIT_READ, CAP_CHECKPOINT_RESTORE, CAP_SYS_TIME, CAP_MKNOD, CAP_SYS_PTRACE, CAP_MAC_ADMIN, CAP_DAC_OVERRIDE, CAP_IPC_LOCK, CAP_SETPCAP, CAP_SYS_MODULE})
+# Inherited Ok({})
+# Permitted Ok({})
+# Ambient Ok({})
+# Failed to setuid: EPERM
+ 
+</code></pre>
+<p>However, if we rerun the program with <code>--cap-add SETUID</code>, the program runs without error. If we look at the logged lines, we can see that <code>CAP_SETUID</code> is in the effective capability set of the process.</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /setuid_example /home/brianshih/alpine 
+		--cap-add SETUID
+# Effective Ok({CAP_SETUID})
+# Bounding Ok({CAP_SETFCAP, CAP_BPF, CAP_MKNOD, CAP_CHOWN, CAP_SETUID, CAP_SYS_TIME, CAP_FSETID, CAP_NET_ADMIN, CAP_SYS_CHROOT, CAP_LINUX_IMMUTABLE, CAP_IPC_LOCK, CAP_SYS_NICE, CAP_SYS_RAWIO, CAP_SETGID, CAP_KILL, CAP_DAC_OVERRIDE, CAP_CHECKPOINT_RESTORE, CAP_SYS_PACCT, CAP_SYS_PTRACE, CAP_MAC_ADMIN, CAP_WAKE_ALARM, CAP_AUDIT_WRITE, CAP_MAC_OVERRIDE, CAP_LEASE, CAP_SYS_RESOURCE, CAP_IPC_OWNER, CAP_FOWNER, CAP_SYS_MODULE, CAP_BLOCK_SUSPEND, CAP_AUDIT_CONTROL, CAP_AUDIT_READ, CAP_PERFMON, CAP_SYSLOG, CAP_NET_RAW, CAP_SYS_ADMIN, CAP_NET_BROADCAST, CAP_SYS_TTY_CONFIG, CAP_SETPCAP, CAP_NET_BIND_SERVICE, CAP_DAC_READ_SEARCH, CAP_SYS_BOOT})
+# Inherited Ok({CAP_SETUID})
+# Permitted Ok({CAP_SETUID})
+# Ambient Ok({CAP_SETUID})
+</code></pre>
+<h3 id="additional-resources"><a class="header" href="#additional-resources">Additional Resources</a></h3>
+<ul>
+<li><a href="https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work">Linux capabilities - why they exist and how they work</a></li>
+<li><a href="https://blog.container-solutions.com/linux-capabilities-in-practice">Linux capabilities in practice</a></li>
+<li><a href="https://www.redhat.com/en/blog/linux-capabilities-in-openshift">Redhat blog - Linux Capabilities</a></li>
+</ul>
 
                     </main>
 

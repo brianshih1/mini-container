@@ -81,7 +81,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html" class="active"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html" class="active"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -143,6 +143,222 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="isolate-filesystem"><a class="header" href="#isolate-filesystem">Isolate Filesystem</a></h1>
+<h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
+<p>We want to provide a process with an isolated view of the filesystem. In other words, we want to ensure the process cannot touch any files and directories from the host’s filesystem.</p>
+<h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
+<p>A filesystem is an organized collection of files and directories. Each directory can be backed by a different filesystem. This is the power of the UNIX filesystem abstraction - all directories and files from all filesystems reside under a single directory tree.</p>
+<p>To attach a filesystem to a directory, we use the <code>mount</code> command. The directory that we mount to is also known as the mount point.</p>
+<pre><code class="language-bash">$ mount device directory
+</code></pre>
+<p>To isolate the filesystem, we need to ensure that the process cannot have access to or modify any mounts of the host system. This is achieved with the help of the mount namespace.</p>
+<p><strong>Mount Namespace</strong></p>
+<p>According to Linux’s <a href="https://man7.org/linux/man-pages/man7/mount_namespaces.7.html">doc</a>, “mount namespaces provide isolation of the list of mounts seen by the processes in each namespace instance. All of the processes that reside in the same mount namespace will see the same view in these files”.  Each mount namespace has its own set of mount points, and modifications to the mount points in one namespace do not affect other namespaces.</p>
+<p>A new mount namespace can be created using either <code>clone</code> or <code>unshare</code> with the <code>CLONE_NEWNS</code> flag. There are a few things to keep in mind - if the namespace is created from <code>clone</code>, the parent process’s mount namespace will be copied to the child namespace; if the namespace is created from <code>unshare</code>, the caller’s previous mount namespace will be copied to the child namespace. This means that modifying files or directories in a newly created mount namespace can affect the host system.</p>
+<p>To achieve isolation, we can use <code>unmount</code> to tear down the root mount. This will not affect the mount list seen in the host system because modifications to the mount list (via <code>mount</code> and <code>unmount</code>) will not affect other mount namespaces.</p>
+<p>However, unmounting the root filesystem is usually not allowed because any files open in the root filesystem would prevent the unmount. But even if we manage to unmount the root filesystem, the system would be unusable as the process won’t be able to load any executables or access any devices.</p>
+<p>Instead, what we want is to swap out the root filesystem with a new filesystem that contains the minimal required system files and libraries. This is where <code>pivot_root</code> comes in.</p>
+<p><strong>pivot_root</strong></p>
+<p><code>pivot_root</code> is a system call that allows us to change the root mount in the mount namespace of the calling process. It takes two directories as arguments - <code>new_root</code> and <code>put_old</code> and it “moves the root mount to the directory <code>put_old</code> and makes <code>new_root</code> the new root mount.” The <code>put_old</code> directory must be at or underneath <code>new_root</code>.</p>
+<pre><code class="language-bash">$ pivot_root new_root put_old
+</code></pre>
+<p>Here are the steps to use <code>pivot_root</code> to achieve filesystem isolation for the container:</p>
+<ul>
+<li>create the <code>new_root</code> directory that will become the new root filesystem. An empty root filesystem is useless, so we need to put any necessary files to run the application into the <code>new_root</code> directory.
+<ul>
+<li>But how do you determine the “necessary files” to run an application? This is where Docker images become useful - Docker images can be thought of as an archive of root filesystems. We can download an image (like <a href="https://alpinelinux.org/downloads/">alpine</a>) and extract it into the <code>new_root</code> directory. An image like <code>alpine</code> would not download the entire OS but an essential set of files of <code>alpine</code>.</li>
+</ul>
+</li>
+<li>create a <code>put_old</code> directory inside the <code>new_root</code> directory.</li>
+<li>create a new mount namespace with <code>unshare</code></li>
+<li>mount the <code>new_root</code> as Linux requires that the new_root is a mount point before changing the root filesystem</li>
+<li>use <code>pivot_root</code> to make <code>new_root</code> the new root filesystem. The <code>put_old</code> directory now points to the original root filesystem.</li>
+<li>unmount the <code>put_old</code> filesystem and remove the <code>put_old</code> directory.</li>
+</ul>
+<p>After those steps, we have an isolated filesystem. Don’t worry if this seems a bit abstract, I will walk through this in detail in <strong>Demo 2</strong> below.</p>
+<h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
+<p><strong>Demo 1: mount namespace</strong></p>
+<p>First, let’s demonstrate that within a mount namespace, mounting or unmounting a filesystem wouldn’t affect other namespaces.</p>
+<pre><code class="language-bash">mkdir /tmp/ex
+mkdir /tmp/ex/one
+sudo unshare -m /bin/bash
+mount -t tmpfs tmpfs /tmp/ex
+ls /tmp/ex
+# empty
+mkdir /tmp/ex/foo
+ls /tmp/ex
+# foo
+
+# From the host system
+ls /tmp/ex
+# one
+</code></pre>
+<p>In the example above, we created a directory <code>/tmp/ex</code> and a directory <code>/one</code> under it.</p>
+<p>Next, we created a new mount namespace with <code>unshare</code> and <code>mount</code>ed a <code>tmpfs</code> filesystem onto <code>/tmp/ex</code>.</p>
+<p>At this point, <code>/tmp/ex</code> is replaced with a new filesystem. We confirm that it’s no longer related to the filesystem in <code>/tmp/ex</code> in the host system by using <code>ls</code> to list all directories inside <code>/tmp/ex</code> and not seeing the <code>/one</code> directory we created earlier.</p>
+<p>To show that modifications to the mounted filesystem have no impact on the host system, we created a directory <code>foo</code> under <code>/tmp/ex</code>. We perform <code>ls /tmp/ex</code> to confirm that <code>foo</code> is inside the directory.</p>
+<p>Now when we check what’s inside <code>/tmp/ex</code> from the host system, we only see the original <code>one</code> directory and not the <code>foo</code> directory. This confirms that mounting a filesystem won’t affect other namespaces.</p>
+<p>As a side note, if you ever want to see which processes are inside which mount namespace, you can use the <code>ps</code> command or look at <code>/proc/self/ns/mnt</code> like below:</p>
+<pre><code class="language-bash">sudo unshare -m /bin/bash
+
+echo $$
+# 6766
+ps -o pid,mntns,args
+
+# PID    MNTNS     COMMAND
+# 6765 4026531841 sudo unshare -m /bin/bash
+# 6766 4026532469 /bin/bash
+# 6772 4026532469 ps -o pid,mntns,args
+
+ls -l /proc/self/ns/mnt
+# lrwxrwxrwx 1 root root 0 Dec 19 16:13 /proc/self/ns/mnt -&gt; 'mnt:[4026532469]'
+</code></pre>
+<p><strong>Demo 2: isolate filesystem with pivot_root</strong></p>
+<p>Earlier, we outlined the steps to use <code>pivot_root</code> to achieve filesystem isolation. Let’s put that into practice. We will be using <a href="https://alpinelinux.org/downloads/">Alpine’s mini root filesystem image</a> as the new root filesystem. Here are the commands:</p>
+<pre><code class="language-bash"># download the alpine image
+wget &lt;https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz&gt;
+# create the new_root directory
+mkdir alpine
+# extract the alpine image into the new_root directory
+tar -xvf alpine-minirootfs-3.19.0-aarch64.tar.gz -C alpine
+cd alpine
+echo &gt; I_AM_ALPINE.txt
+
+# create the mount namespace
+sudo unshare -m
+# make the new_root directory a mount point
+mount --bind alpine alpine
+# create the put_old directory
+mkdir alpine/oldrootfs
+cd alpine
+# swap out the root filesystem
+pivot_root . oldrootfs
+
+cd /
+ls
+# I_AM_ALPINE.txt.    # bin     etc       lib       mnt       opt       root      sbin      sys       usr
+# dev       home      media     old_root  proc      run       srv       tmp       var
+
+ls /oldroot/
+# bin         cdrom       etc         lib         media       old         opt         root        sbin        srv         sys         usr
+# boot        dev         home        lost+found  mnt         old2        proc        run         snap        swapfile    tmp         var
+
+umount -l old_root/
+rmdir old_root/
+</code></pre>
+<p>We first download the alpine image and extract the alpine image into a newly created <code>alpine</code> directory that will serve as the <code>new_root</code> in <code>pivot_root</code>. Next, we create a mount point from the <code>alpine</code> directory.</p>
+<p>Next, we need to create the <code>put_old</code> directory for <code>pivot_root</code> under the <code>alpine</code> directory, which is <code>alpine/oldrootfs</code>. Finally, we use <code>pivot_root</code> to swap out the root filesystem.</p>
+<p>If we navigate to the root directory via <code>cd /</code> and vverifythat the root directory is indeed the Alpine filesystem (as it contains <code>I_AM_ALPINE.txt</code>). However, we can still see the <code>old_root</code> directory which points to the original root filesystem. Therefore, we need to unmount it and remove the directory to be isolated from the original filesystem of the host.</p>
+<p>We can also verify the mount points in the host system as follows:</p>
+<pre><code class="language-bash"># host system. 10920 is the pid of the process with the isolated filesystem
+cat /proc/10920/mounts
+# /dev/vda2 / ext4 rw,relatime,errors=remount-ro 0 0
+
+cat /proc/10920/mountinfo
+# 1066 985 252:2 /home/brianshih/alpine / rw,relatime - ext4 /dev/vda2 rw,errors=remount-ro
+</code></pre>
+<p>We can see that the process with the isolated filesystem only has one mount point whose root is <code>/home/brianshih/alpine</code>.</p>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<p>The implementation for my toy container is more-or-less just Demo 2 in the form of Rust code.</p>
+<p>Here is a wrapper helper function around the <code>mount</code> system call. Note that according to the Linux <a href="https://man7.org/linux/man-pages/man8/mount.8.html">doc</a>, if only the directory is provided, then <code>mount</code> modifies an existing mount point.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Wrapper around the mount syscall
+fn mount_filesystem(
+    filesystem_path: Option&lt;&amp;PathBuf&gt;,
+    target_directory: &amp;PathBuf,
+    flags: Vec&lt;MsFlags&gt;,
+) -&gt; ContainerResult {
+    let mut mountflags = MsFlags::empty();
+    for flag in flags {
+        mountflags.insert(flag);
+    }
+    match mount::&lt;PathBuf, PathBuf, PathBuf, PathBuf&gt;(
+        filesystem_path,
+        target_directory,
+        None,
+        mountflags,
+        None,
+    ) {
+        Ok(_) =&gt; Ok(()),
+        Err(err) =&gt; {
+            println!(&quot;Failed to mount directory. Error: {:?}&quot;, err);
+            return Err(ContainerError::MountSysCall);
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the code that isolates the filesystem.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn isolate_filesystem(config: &amp;ChildConfig) -&gt; ContainerResult {
+    mount_filesystem(
+        None,
+        &amp;PathBuf::from(&quot;/&quot;),
+        vec![MsFlags::MS_REC, MsFlags::MS_PRIVATE],
+    )?;
+    let filesystem_path = PathBuf::from(&quot;/home/brianshih/alpine&quot;);
+    mount_filesystem(
+        Some(&amp;filesystem_path),
+        &amp;filesystem_path,
+        vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
+    )?;
+    let root_filesystem_path = &amp;config.root_filesystem_directory;
+    let old_root_path = &quot;oldrootfs&quot;;
+    let old_root_absolute_path = PathBuf::from(format!(&quot;{root_filesystem_path}/{old_root_path}&quot;));
+    if let Err(e) = create_dir_all(&amp;old_root_absolute_path) {
+        return Err(ContainerError::CreateDir);
+    }
+
+    if let Err(e) = pivot_root(&amp;filesystem_path, &amp;PathBuf::from(old_root_absolute_path)) {
+        return Err(ContainerError::PivotRoot);
+    };
+    if let Err(e) = umount2(
+        &amp;PathBuf::from(format!(&quot;/{old_root_path}&quot;)),
+        MntFlags::MNT_DETACH,
+    ) {
+        return Err(ContainerError::Umount);
+    }
+    if let Err(e) = remove_dir(&amp;PathBuf::from(format!(&quot;/{old_root_path}&quot;))) {
+        return Err(ContainerError::RemoveDir);
+    };
+		// Change the directory to the root directory
+    if let Err(e) = chdir(&amp;PathBuf::from(&quot;/&quot;)) {
+        return Err(ContainerError::ChangeDir);
+    };
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Something we didn’t cover is the propagation type of a mount point. Each mount point is one of four types: <code>MS_SHARED</code>, <code>MS_PRIVATE</code>, <code>MS_SLAVE</code>, and <code>MS_UNBINDABLE</code>. Mount points of type <code>MS_SHARED</code> are shared across different mounts of the same peer group (learn more about peer groups <a href="https://lwn.net/Articles/689856/">here</a>). Mount points of type <code>MS_PRIVATE</code> do not propagate events to their peers.</p>
+<p>In my code snippet, we recursively set all mount points in the root filesystem to <code>MS_PRIVATE</code> to make sure that no events are propagated to other mount namespaces.</p>
+<p>Apart from that, the code is fairly straightforward and reproduces what we did in Demo 2.</p>
+<h3 id="testing-the-implementation"><a class="header" href="#testing-the-implementation">Testing the Implementation</a></h3>
+<p>To test whether the process has an isolated filesystem, we first create the <code>alpine</code> directory which will serve as the directory for the new root.</p>
+<p>Next, we create the container environment and run <code>/bin/ash</code> via <code>sudo target/debug/mini-container /bin/ash /home/brianshih/alpine</code>. <code>/home/brianshih/alpine</code> is the path to the new root filesystem for our container.</p>
+<p>After that, we navigate to the root directory and confirm that the root filesystem is the one created from the <code>alpine</code> directory.</p>
+<pre><code class="language-bash"># download the alpine image
+wget &lt;https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz&gt;
+# create the new_root directory
+mkdir alpine
+# extract the alpine image into the new_root directory
+tar -xvf alpine-minirootfs-3.19.0-aarch64.tar.gz -C alpine
+cd alpine
+echo &gt; I_AM_ALPINE.txt
+
+sudo target/debug/mini-container /bin/ash /home/brianshih/alpine
+cd /
+ls
+# I_AM_ALPINE.txt  lib              root             tmp
+# bin              media            run              usr
+# dev              mnt              sbin             var
+# etc              opt              srv
+# home             proc             sys
+</code></pre>
+<h3 id="additional-resources"><a class="header" href="#additional-resources">Additional Resources</a></h3>
+<ul>
+<li><a href="https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/namespaces/mount-namespace">Docker Security Blog - Mount Namespace</a></li>
+<li><a href="https://techtalk.digitalpress.blog/building-a-container-from-scratch-part-2/">Building a container from scratch - part 2</a></li>
+<li><a href="https://lwn.net/Articles/689856/">Blog about mount namespaces and shared subtrees</a></li>
+</ul>
 
                     </main>
 

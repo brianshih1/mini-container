@@ -82,7 +82,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Deep Dive into Conatiners</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="preface.html">Preface</a></li><li class="chapter-item expanded affix "><a href="container_definition.html">What exactly is a Container?</a></li><li class="chapter-item expanded affix "><a href="api.html">API</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><li class="part-title">Implementing a Container</li><li class="chapter-item expanded "><a href="higher_level_setup.html"><strong aria-hidden="true">1.</strong> Higher Level Setup</a></li><li class="chapter-item expanded "><a href="isolate_filesystem.html"><strong aria-hidden="true">2.</strong> Isolate Filesystem</a></li><li class="chapter-item expanded "><a href="limit_syscalls.html"><strong aria-hidden="true">3.</strong> Limit Syscalls</a></li><li class="chapter-item expanded "><a href="capabilities.html"><strong aria-hidden="true">4.</strong> Capabilities</a></li><li class="chapter-item expanded "><a href="user_namespace.html"><strong aria-hidden="true">5.</strong> User Namespace</a></li><li class="chapter-item expanded "><a href="resource_restrictions.html"><strong aria-hidden="true">6.</strong> Resource Restrictions</a></li><li class="spacer"></li><li class="chapter-item expanded affix "><a href="future_work.html">Future Work</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -145,7 +145,7 @@
                     <main>
                         <h1 id="preface"><a class="header" href="#preface">Preface</a></h1>
 <p>I’ve been using Docker for many years, but I’ve always viewed it as a magical black box. I know that Docker creates containers which are isolated environments to run code. However, I don’t know what “isolated” really means. To unveil the black box, I implemented containers from scratch in Rust.</p>
-<p>Luckily, there are a ton of tutorials and resources online that I can learn from. I relied heavily on these two blogs in particular: <a href="https://blog.lizzie.io/linux-containers-in-500-loc.html">Linux Containers in 500 Lines of Code</a> &amp; <a href="https://litchipi.github.io/series/container_in_rust">Writing a Container in Rust</a>. As someone who knew very little about Linux, the experience of building a container is extremely eye-opening and rewarding.</p>
+<p>Luckily, there are a ton of tutorials and resources online that I can learn from. My implementation is largely based on these two blogs in particular: <a href="https://blog.lizzie.io/linux-containers-in-500-loc.html">Linux Containers in 500 Lines of Code</a> &amp; <a href="https://litchipi.github.io/series/container_in_rust">Writing a Container in Rust</a>. As someone who knew very little about Linux, the experience of building a container is extremely eye-opening and rewarding.</p>
 <p>Here is a summary of the components that make up my toy container:</p>
 <ul>
 <li>root filesystem isolation with mount namespace</li>
@@ -163,7 +163,7 @@
 <h3 id="filesystem-isolation"><a class="header" href="#filesystem-isolation">Filesystem Isolation</a></h3>
 <p>Firstly, a process in a container has an isolated view of the filesystem. In the demo below, we created a container based on the <code>ubuntu</code> image.</p>
 <p>If we navigate to the root directory via <code>cd /</code>, we notice that the root filesystem of the process in a container is not the same one as the root filesystem on the host system. Modifying the root filesystem within the container will have no impact on the host system.</p>
-<pre><code class="language-docker">docker run -it ubuntu bash
+<pre><code class="language-bash">docker run -it ubuntu bash
 cd /
 ls
 # bin  boot  dev  etc  home  lib  media  mnt  opt  proc
@@ -197,7 +197,7 @@ root       6098  0.0  0.0   4136  3200 pts/0    Ss+  15:19   0:00 bash
 <h3 id="user-id-isolation"><a class="header" href="#user-id-isolation">User ID Isolation</a></h3>
 <p>In a container, things like the user ID and group ID are isolated. What this unlocks is that a process can run as a root user inside the container while actually being an unprivileged user on the host.</p>
 <p>In the example below, we enable the <code>user namespace</code> via <code>--userns-remap=default</code>. The process in the container perceives its <code>uid</code> as 0. But if we look at the user corresponding to the process from the host system, the user is in fact <code>165536</code>.</p>
-<pre><code class="language-docker">sudo dockerd --userns-remap=default
+<pre><code class="language-bash">sudo dockerd --userns-remap=default
 sudo docker run -it --rm busybox /bin/sh
 id
 # uid=0(root) gid=0(root) groups=0(root),10(wheel)
@@ -213,8 +213,8 @@ ps -a -u
 <p>As an example, here is how you can limit the container to have a memory limit of 128 mb.</p>
 <pre><code class="language-bash">docker run -it --memory 128m ubuntu bash
 </code></pre>
-<h2 id="secret-behind-docker"><a class="header" href="#secret-behind-docker">Secret behind Docker</a></h2>
-<p>So how does Docker achieve all these different forms of isolation and resource restriction? It boils down to the following Linux primitives:</p>
+<h2 id="secret-behind-containers"><a class="header" href="#secret-behind-containers">Secret behind Containers</a></h2>
+<p>So how does a container provide the isolation properties demonstrated above? It boils down to the following Linux primitives:</p>
 <ul>
 <li>Namespaces</li>
 <li>Capabilities</li>
@@ -223,7 +223,7 @@ ps -a -u
 <p>We will cover these in greater detail throughout the blog!</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="api"><a class="header" href="#api">API</a></h1>
 <p>Before we talk about the theory of and implementation behind containers, let’s first look at what we plan to build in this project. Don’t worry if some of these terminologies or terms are confusing, I will try to explain them all in this blog.</p>
-<h3 id="command"><a class="header" href="#command">Command</a></h3>
+<p>At the core, the <code>mini-container</code> program takes two arguments: an executable program and a directory that points to a root filesystem. It creates a process, sets up the container environment, and executes the executable program in this container.</p>
 <p>Here are the arguments and options to execute my toy container.</p>
 <pre><code>mini-container [OPTIONS] &lt;PATH_TO_EXECUTABLE&gt; &lt;ROOT_FILESYSTEM_PATH&gt;
 </code></pre>
@@ -283,12 +283,1131 @@ tar -xvf alpine-minirootfs-3.19.0-aarch64.tar.gz -C alpine
 <pre><code class="language-bash">docker run --rm --user $UID:$GID alpine ash
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="project-overview"><a class="header" href="#project-overview">Project Overview</a></h1>
+<p>Here is the higher-level setup for this project:</p>
+<ul>
+<li>parse the command line argument</li>
+<li>create the child process</li>
+<li>setup the namespaces, capabilities, and syscalls restrictions</li>
+<li>executing the program</li>
+</ul>
+<h3 id="parse-the-command-line-argument"><a class="header" href="#parse-the-command-line-argument">Parse the command line argument</a></h3>
+<p>To parse the command line arguments, we use the <a href="https://crates.io/crates/clap">clap crate</a>. Here is the struct representation of the parsed arguments:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[derive(Parser)]
+struct Cli {
+    /// Command to execute
+    command: String,
+
+    /// Absolute path to new root filesystem
+    root_filesystem_path: String,
+
+    /// Optional pid for child process
+    #[arg(short, long)]
+    pid: Option&lt;u32&gt;,
+
+    /// Memory limit (megabytes)
+    #[arg(short, long)]
+    memory: Option&lt;i64&gt;,
+
+    /// Memory limit (megabytes)
+    #[arg(long)]
+    nproc: Option&lt;i64&gt;,
+
+    /// Memory limit (megabytes)
+    #[arg(short, long)]
+    user: Option&lt;u32&gt;,
+
+    // Add capabilities to the bounding set
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    cap_add: Option&lt;Vec&lt;String&gt;&gt;,
+
+    // Remove capabilities to the bounding set, or all if the String provided is &quot;ALL&quot;
+    #[clap(long, value_parser, num_args = 1.., value_delimiter = ' ')]
+    cap_drop: Option&lt;Vec&lt;String&gt;&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The entry point of the project is the <code>run</code> method. All we have to do is call <code>Cli::parse()</code> to parse the arguments</p>
+<pre><pre class="playground"><code class="language-rust">fn main() {
+    if let Err(_) = run() {
+        cleanup();
+        exit(-1);
+    }
+}
+
+fn run() -&gt; ContainerResult {
+    let cli = Cli::parse();
+	  ...
+}</code></pre></pre>
+<h3 id="create-the-child-process"><a class="header" href="#create-the-child-process">Create the child process</a></h3>
+<p>Since a container is just a process, we need to create the child process for the container. The function to create the child process is <code>create_child_process</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn run() -&gt; ContainerResult {
+    let cli = Cli::parse();
+
+	  ...
+    let child_pid = create_child_process(&amp;config)?;
+    if let Err(e) = waitpid(child_pid, None) {
+        println!(&quot;Error waiting for pid: {:?}&quot;, e);
+        return Err(ContainerError::WaitPid);
+    };
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>After creating the child process, we don’t want the parent process to terminate until the child process completes. Therefore, we use the <a href="https://linux.die.net/man/2/waitpid">waitpid</a> call to wait until the child process finishes.</p>
+<p>Here is the implementation for <code>create_child_process</code>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Creates a child process with clone and runs the executable file
+// with execve in the child process.
+fn create_child_process(config: &amp;ChildConfig) -&gt; Result&lt;Pid, ContainerError&gt; {
+    let mut flags = CloneFlags::empty();
+    flags.insert(CloneFlags::CLONE_NEWNS);
+    flags.insert(CloneFlags::CLONE_NEWCGROUP);
+    flags.insert(CloneFlags::CLONE_NEWPID);
+    flags.insert(CloneFlags::CLONE_NEWIPC);
+    flags.insert(CloneFlags::CLONE_NEWNET);
+    flags.insert(CloneFlags::CLONE_NEWUTS);
+    let mut stack = [0; STACK_SIZE];
+    let clone_res = unsafe {
+        clone(
+            Box::new(|| match child(config) {
+                Ok(_) =&gt; 0,
+                Err(_) =&gt; -1,
+            }),
+            &amp;mut stack,
+            flags,
+            Some(Signal::SIGCHLD as i32),
+            // If the signal SIGCHLD is ignored, waitpid will hang until the
+            // child exits and then fail with code ECHILD.
+        )
+    };
+
+    match clone_res {
+        Ok(pid) =&gt; {
+            println!(&quot;Child pid: {:?}&quot;, pid);
+            Ok(pid)
+        }
+        Err(_) =&gt; Err(ContainerError::Clone),
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>It uses <code>clone</code> to create the child process. It clones with a bunch of flags such as <code>CLONE_NEWNS</code>, <code>CLONE_NEWPID</code>, etc in order to create the different namespaces (user, mount, pid, etc) necessary for isolation. We will cover these namespaces in more detail later.</p>
+<p>The Linux <a href="https://man7.org/linux/man-pages/man2/clone.2.html">clone</a> method takes a function argument. When the function returns, the child process terminates. The function we pass to clone is the <code>child</code> method whose responsibility is to set up the container environment and execute the user-provided program.</p>
+<h3 id="setup-the-namespaces-capabilities-and-syscalls-restrictions--executing-the-program"><a class="header" href="#setup-the-namespaces-capabilities-and-syscalls-restrictions--executing-the-program">Setup the namespaces, capabilities, and syscalls restrictions &amp; Executing the program</a></h3>
+<p>Here is the implementation of <code>child</code>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// setup the namespaces, capabilities, syscall restrictions before running the executable
+fn child(config: &amp;ChildConfig) -&gt; ContainerResult {
+    set_hostname(config)?;
+    isolate_filesystem(config)?;
+    user_ns(config)?;
+    capabilities(config)?;
+    syscalls()?;
+    match execve::&lt;CString, CString&gt;(&amp;config.exec_path, &amp;config.args, &amp;[]) {
+        Ok(_) =&gt; Ok(()),
+        Err(e) =&gt; {
+            println!(&quot;Failed to execute!: {:?}&quot;, e);
+            Err(ContainerError::Execve)
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Before using <code>execve</code> to execute the user-provided program, we set up the container environment for the execution by isolating the filesystem, setting up the user namespace, granting and taking away capabilities, and restricting syscalls.</p>
+<h3 id="summary"><a class="header" href="#summary">Summary</a></h3>
+<p>To summarize, the project contains these core methods:</p>
+<ul>
+<li><strong>run</strong>: parses the command line arguments. Creates the child process and waits until the child process terminates</li>
+<li><strong>create_child_process</strong>: uses clone to create the child process. Pass in the <code>child</code> as the function argument to <code>clone</code></li>
+<li><strong>child</strong>: sets up the container environment before executing the user-provided program with <code>execve</code></li>
+</ul>
+<p>For the rest of this blog, we will focus on learning how we can set up the container environment for the process. For each component of the container environment, we will break it down into:</p>
+<ul>
+<li>Goal</li>
+<li>Theory</li>
+<li>Demo</li>
+<li>Implementation</li>
+<li>Testing the Implementation</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="isolate-filesystem"><a class="header" href="#isolate-filesystem">Isolate Filesystem</a></h1>
+<h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
+<p>We want to provide a process with an isolated view of the filesystem. In other words, we want to ensure the process cannot touch any files and directories from the host’s filesystem.</p>
+<h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
+<p>A filesystem is an organized collection of files and directories. Each directory can be backed by a different filesystem. This is the power of the UNIX filesystem abstraction - all directories and files from all filesystems reside under a single directory tree.</p>
+<p>To attach a filesystem to a directory, we use the <code>mount</code> command. The directory that we mount to is also known as the mount point.</p>
+<pre><code class="language-bash">$ mount device directory
+</code></pre>
+<p>To isolate the filesystem, we need to ensure that the process cannot have access to or modify any mounts of the host system. This is achieved with the help of the mount namespace.</p>
+<p><strong>Mount Namespace</strong></p>
+<p>According to Linux’s <a href="https://man7.org/linux/man-pages/man7/mount_namespaces.7.html">doc</a>, “mount namespaces provide isolation of the list of mounts seen by the processes in each namespace instance. All of the processes that reside in the same mount namespace will see the same view in these files”.  Each mount namespace has its own set of mount points, and modifications to the mount points in one namespace do not affect other namespaces.</p>
+<p>A new mount namespace can be created using either <code>clone</code> or <code>unshare</code> with the <code>CLONE_NEWNS</code> flag. There are a few things to keep in mind - if the namespace is created from <code>clone</code>, the parent process’s mount namespace will be copied to the child namespace; if the namespace is created from <code>unshare</code>, the caller’s previous mount namespace will be copied to the child namespace. This means that modifying files or directories in a newly created mount namespace can affect the host system.</p>
+<p>To achieve isolation, we can use <code>unmount</code> to tear down the root mount. This will not affect the mount list seen in the host system because modifications to the mount list (via <code>mount</code> and <code>unmount</code>) will not affect other mount namespaces.</p>
+<p>However, unmounting the root filesystem is usually not allowed because any files open in the root filesystem would prevent the unmount. But even if we manage to unmount the root filesystem, the system would be unusable as the process won’t be able to load any executables or access any devices.</p>
+<p>Instead, what we want is to swap out the root filesystem with a new filesystem that contains the minimal required system files and libraries. This is where <code>pivot_root</code> comes in.</p>
+<p><strong>pivot_root</strong></p>
+<p><code>pivot_root</code> is a system call that allows us to change the root mount in the mount namespace of the calling process. It takes two directories as arguments - <code>new_root</code> and <code>put_old</code> and it “moves the root mount to the directory <code>put_old</code> and makes <code>new_root</code> the new root mount.” The <code>put_old</code> directory must be at or underneath <code>new_root</code>.</p>
+<pre><code class="language-bash">$ pivot_root new_root put_old
+</code></pre>
+<p>Here are the steps to use <code>pivot_root</code> to achieve filesystem isolation for the container:</p>
+<ul>
+<li>create the <code>new_root</code> directory that will become the new root filesystem. An empty root filesystem is useless, so we need to put any necessary files to run the application into the <code>new_root</code> directory.
+<ul>
+<li>But how do you determine the “necessary files” to run an application? This is where Docker images become useful - Docker images can be thought of as an archive of root filesystems. We can download an image (like <a href="https://alpinelinux.org/downloads/">alpine</a>) and extract it into the <code>new_root</code> directory. An image like <code>alpine</code> would not download the entire OS but an essential set of files of <code>alpine</code>.</li>
+</ul>
+</li>
+<li>create a <code>put_old</code> directory inside the <code>new_root</code> directory.</li>
+<li>create a new mount namespace with <code>unshare</code></li>
+<li>mount the <code>new_root</code> as Linux requires that the new_root is a mount point before changing the root filesystem</li>
+<li>use <code>pivot_root</code> to make <code>new_root</code> the new root filesystem. The <code>put_old</code> directory now points to the original root filesystem.</li>
+<li>unmount the <code>put_old</code> filesystem and remove the <code>put_old</code> directory.</li>
+</ul>
+<p>After those steps, we have an isolated filesystem. Don’t worry if this seems a bit abstract, I will walk through this in detail in <strong>Demo 2</strong> below.</p>
+<h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
+<p><strong>Demo 1: mount namespace</strong></p>
+<p>First, let’s demonstrate that within a mount namespace, mounting or unmounting a filesystem wouldn’t affect other namespaces.</p>
+<pre><code class="language-bash">mkdir /tmp/ex
+mkdir /tmp/ex/one
+sudo unshare -m /bin/bash
+mount -t tmpfs tmpfs /tmp/ex
+ls /tmp/ex
+# empty
+mkdir /tmp/ex/foo
+ls /tmp/ex
+# foo
+
+# From the host system
+ls /tmp/ex
+# one
+</code></pre>
+<p>In the example above, we created a directory <code>/tmp/ex</code> and a directory <code>/one</code> under it.</p>
+<p>Next, we created a new mount namespace with <code>unshare</code> and <code>mount</code>ed a <code>tmpfs</code> filesystem onto <code>/tmp/ex</code>.</p>
+<p>At this point, <code>/tmp/ex</code> is replaced with a new filesystem. We confirm that it’s no longer related to the filesystem in <code>/tmp/ex</code> in the host system by using <code>ls</code> to list all directories inside <code>/tmp/ex</code> and not seeing the <code>/one</code> directory we created earlier.</p>
+<p>To show that modifications to the mounted filesystem have no impact on the host system, we created a directory <code>foo</code> under <code>/tmp/ex</code>. We perform <code>ls /tmp/ex</code> to confirm that <code>foo</code> is inside the directory.</p>
+<p>Now when we check what’s inside <code>/tmp/ex</code> from the host system, we only see the original <code>one</code> directory and not the <code>foo</code> directory. This confirms that mounting a filesystem won’t affect other namespaces.</p>
+<p>As a side note, if you ever want to see which processes are inside which mount namespace, you can use the <code>ps</code> command or look at <code>/proc/self/ns/mnt</code> like below:</p>
+<pre><code class="language-bash">sudo unshare -m /bin/bash
+
+echo $$
+# 6766
+ps -o pid,mntns,args
+
+# PID    MNTNS     COMMAND
+# 6765 4026531841 sudo unshare -m /bin/bash
+# 6766 4026532469 /bin/bash
+# 6772 4026532469 ps -o pid,mntns,args
+
+ls -l /proc/self/ns/mnt
+# lrwxrwxrwx 1 root root 0 Dec 19 16:13 /proc/self/ns/mnt -&gt; 'mnt:[4026532469]'
+</code></pre>
+<p><strong>Demo 2: isolate filesystem with pivot_root</strong></p>
+<p>Earlier, we outlined the steps to use <code>pivot_root</code> to achieve filesystem isolation. Let’s put that into practice. We will be using <a href="https://alpinelinux.org/downloads/">Alpine’s mini root filesystem image</a> as the new root filesystem. Here are the commands:</p>
+<pre><code class="language-bash"># download the alpine image
+wget &lt;https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz&gt;
+# create the new_root directory
+mkdir alpine
+# extract the alpine image into the new_root directory
+tar -xvf alpine-minirootfs-3.19.0-aarch64.tar.gz -C alpine
+cd alpine
+echo &gt; I_AM_ALPINE.txt
+
+# create the mount namespace
+sudo unshare -m
+# make the new_root directory a mount point
+mount --bind alpine alpine
+# create the put_old directory
+mkdir alpine/oldrootfs
+cd alpine
+# swap out the root filesystem
+pivot_root . oldrootfs
+
+cd /
+ls
+# I_AM_ALPINE.txt.    # bin     etc       lib       mnt       opt       root      sbin      sys       usr
+# dev       home      media     old_root  proc      run       srv       tmp       var
+
+ls /oldroot/
+# bin         cdrom       etc         lib         media       old         opt         root        sbin        srv         sys         usr
+# boot        dev         home        lost+found  mnt         old2        proc        run         snap        swapfile    tmp         var
+
+umount -l old_root/
+rmdir old_root/
+</code></pre>
+<p>We first download the alpine image and extract the alpine image into a newly created <code>alpine</code> directory that will serve as the <code>new_root</code> in <code>pivot_root</code>. Next, we create a mount point from the <code>alpine</code> directory.</p>
+<p>Next, we need to create the <code>put_old</code> directory for <code>pivot_root</code> under the <code>alpine</code> directory, which is <code>alpine/oldrootfs</code>. Finally, we use <code>pivot_root</code> to swap out the root filesystem.</p>
+<p>If we navigate to the root directory via <code>cd /</code> and vverifythat the root directory is indeed the Alpine filesystem (as it contains <code>I_AM_ALPINE.txt</code>). However, we can still see the <code>old_root</code> directory which points to the original root filesystem. Therefore, we need to unmount it and remove the directory to be isolated from the original filesystem of the host.</p>
+<p>We can also verify the mount points in the host system as follows:</p>
+<pre><code class="language-bash"># host system. 10920 is the pid of the process with the isolated filesystem
+cat /proc/10920/mounts
+# /dev/vda2 / ext4 rw,relatime,errors=remount-ro 0 0
+
+cat /proc/10920/mountinfo
+# 1066 985 252:2 /home/brianshih/alpine / rw,relatime - ext4 /dev/vda2 rw,errors=remount-ro
+</code></pre>
+<p>We can see that the process with the isolated filesystem only has one mount point whose root is <code>/home/brianshih/alpine</code>.</p>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<p>The implementation for my toy container is more-or-less just Demo 2 in the form of Rust code.</p>
+<p>Here is a wrapper helper function around the <code>mount</code> system call. Note that according to the Linux <a href="https://man7.org/linux/man-pages/man8/mount.8.html">doc</a>, if only the directory is provided, then <code>mount</code> modifies an existing mount point.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Wrapper around the mount syscall
+fn mount_filesystem(
+    filesystem_path: Option&lt;&amp;PathBuf&gt;,
+    target_directory: &amp;PathBuf,
+    flags: Vec&lt;MsFlags&gt;,
+) -&gt; ContainerResult {
+    let mut mountflags = MsFlags::empty();
+    for flag in flags {
+        mountflags.insert(flag);
+    }
+    match mount::&lt;PathBuf, PathBuf, PathBuf, PathBuf&gt;(
+        filesystem_path,
+        target_directory,
+        None,
+        mountflags,
+        None,
+    ) {
+        Ok(_) =&gt; Ok(()),
+        Err(err) =&gt; {
+            println!(&quot;Failed to mount directory. Error: {:?}&quot;, err);
+            return Err(ContainerError::MountSysCall);
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the code that isolates the filesystem.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn isolate_filesystem(config: &amp;ChildConfig) -&gt; ContainerResult {
+    mount_filesystem(
+        None,
+        &amp;PathBuf::from(&quot;/&quot;),
+        vec![MsFlags::MS_REC, MsFlags::MS_PRIVATE],
+    )?;
+    let filesystem_path = PathBuf::from(&quot;/home/brianshih/alpine&quot;);
+    mount_filesystem(
+        Some(&amp;filesystem_path),
+        &amp;filesystem_path,
+        vec![MsFlags::MS_BIND, MsFlags::MS_PRIVATE],
+    )?;
+    let root_filesystem_path = &amp;config.root_filesystem_directory;
+    let old_root_path = &quot;oldrootfs&quot;;
+    let old_root_absolute_path = PathBuf::from(format!(&quot;{root_filesystem_path}/{old_root_path}&quot;));
+    if let Err(e) = create_dir_all(&amp;old_root_absolute_path) {
+        return Err(ContainerError::CreateDir);
+    }
+
+    if let Err(e) = pivot_root(&amp;filesystem_path, &amp;PathBuf::from(old_root_absolute_path)) {
+        return Err(ContainerError::PivotRoot);
+    };
+    if let Err(e) = umount2(
+        &amp;PathBuf::from(format!(&quot;/{old_root_path}&quot;)),
+        MntFlags::MNT_DETACH,
+    ) {
+        return Err(ContainerError::Umount);
+    }
+    if let Err(e) = remove_dir(&amp;PathBuf::from(format!(&quot;/{old_root_path}&quot;))) {
+        return Err(ContainerError::RemoveDir);
+    };
+		// Change the directory to the root directory
+    if let Err(e) = chdir(&amp;PathBuf::from(&quot;/&quot;)) {
+        return Err(ContainerError::ChangeDir);
+    };
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Something we didn’t cover is the propagation type of a mount point. Each mount point is one of four types: <code>MS_SHARED</code>, <code>MS_PRIVATE</code>, <code>MS_SLAVE</code>, and <code>MS_UNBINDABLE</code>. Mount points of type <code>MS_SHARED</code> are shared across different mounts of the same peer group (learn more about peer groups <a href="https://lwn.net/Articles/689856/">here</a>). Mount points of type <code>MS_PRIVATE</code> do not propagate events to their peers.</p>
+<p>In my code snippet, we recursively set all mount points in the root filesystem to <code>MS_PRIVATE</code> to make sure that no events are propagated to other mount namespaces.</p>
+<p>Apart from that, the code is fairly straightforward and reproduces what we did in Demo 2.</p>
+<h3 id="testing-the-implementation"><a class="header" href="#testing-the-implementation">Testing the Implementation</a></h3>
+<p>To test whether the process has an isolated filesystem, we first create the <code>alpine</code> directory which will serve as the directory for the new root.</p>
+<p>Next, we create the container environment and run <code>/bin/ash</code> via <code>sudo target/debug/mini-container /bin/ash /home/brianshih/alpine</code>. <code>/home/brianshih/alpine</code> is the path to the new root filesystem for our container.</p>
+<p>After that, we navigate to the root directory and confirm that the root filesystem is the one created from the <code>alpine</code> directory.</p>
+<pre><code class="language-bash"># download the alpine image
+wget &lt;https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz&gt;
+# create the new_root directory
+mkdir alpine
+# extract the alpine image into the new_root directory
+tar -xvf alpine-minirootfs-3.19.0-aarch64.tar.gz -C alpine
+cd alpine
+echo &gt; I_AM_ALPINE.txt
+
+sudo target/debug/mini-container /bin/ash /home/brianshih/alpine
+cd /
+ls
+# I_AM_ALPINE.txt  lib              root             tmp
+# bin              media            run              usr
+# dev              mnt              sbin             var
+# etc              opt              srv
+# home             proc             sys
+</code></pre>
+<h3 id="additional-resources"><a class="header" href="#additional-resources">Additional Resources</a></h3>
+<ul>
+<li><a href="https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/namespaces/mount-namespace">Docker Security Blog - Mount Namespace</a></li>
+<li><a href="https://techtalk.digitalpress.blog/building-a-container-from-scratch-part-2/">Building a container from scratch - part 2</a></li>
+<li><a href="https://lwn.net/Articles/689856/">Blog about mount namespaces and shared subtrees</a></li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="limit-syscalls"><a class="header" href="#limit-syscalls">Limit Syscalls</a></h1>
+<h3 id="goal-1"><a class="header" href="#goal-1">Goal</a></h3>
+<p>Restrict the number of system calls that the running process can make to protect the host system.</p>
+<h3 id="theory-1"><a class="header" href="#theory-1">Theory</a></h3>
+<p>Certain system calls may pose security risks or impact the host system. <a href="https://man7.org/linux/man-pages/man2/seccomp.2.html">Seccomp</a> (Secure Computing Mode) is a Linux feature that allows developers to filter system calls to the kernel. Seccomp operates in two modes:</p>
+<ul>
+<li>Strict: a minimal set of syscalls is allowed</li>
+<li>Filter: allows developers to define custom policies for which syscalls are permitted</li>
+</ul>
+<p>Seccomp filters are expressed as Berkeley Packet Filters (BPF) programs. These filters can be used to allow or deny system calls, as well as conditionally filter on system call arguments.</p>
+<p>For this project, we will be using the following seccomp system calls</p>
+<ul>
+<li><a href="https://man7.org/linux/man-pages/man3/seccomp_init.3.html">seccomp_init</a>: initializes the seccomp filter</li>
+<li><a href="https://man7.org/linux/man-pages/man3/seccomp_rule_add.3.html">seccomp_rule_add</a>: add a new filter rule to the current seccomp filter</li>
+<li><a href="https://man7.org/linux/man-pages/man3/seccomp_load.3.html">seccomp_load</a>: load the current seccomp filter into the kernel</li>
+</ul>
+<p>Each filter in the seccomp filter returns an action, that can be one of:</p>
+<ul>
+<li>SCMP_ACT_KILL: kill the thread</li>
+<li>SCMP_ACT_KILL_PROCESS: kill the process</li>
+<li>SCMP_ACT_TRAP: throw a SIGSYS signal</li>
+<li>SCMP_ACT_ERRNO: return value with the specified error code:</li>
+<li>SCMP_ACT_TRACE: notify the tracer</li>
+<li>SCMP_ACT_LOG: logged</li>
+<li>SCMP_ACT_ALLOW: allowed</li>
+<li>SCMP_ACT_NOTIFY: monitoring process will be notified</li>
+</ul>
+<p>In short, Seccomp allows us to set rules that determine what happens when certain system calls are invoked. Seccomp is a powerful tool. But knowing which system calls to filter out is the tricky part. In this blog, I will focus only on the mechanism of filtering system calls and not discuss which system calls are dangerous. For an explanation of that, I suggest <a href="https://blog.lizzie.io/linux-containers-in-500-loc.html#org8504d16">Lizzie’s blog</a> or <a href="https://github.com/docker/docs/blob/1253f14f6dd83df2cf9965182de118e5886c1b9e/content/engine/security/seccomp.md">Docker’s documentation</a>.</p>
+<h3 id="demo-1"><a class="header" href="#demo-1">Demo</a></h3>
+<p>For this project, we will be using the <a href="https://docs.rs/syscallz/latest/syscallz/">syscallz crate</a>, a seccomp library for Rust.</p>
+<p>In the following example, we will try and limit the <code>getpid</code> system call. In the library, <code>Context::init_with_action</code>, <code>ctx.set_action_for_syscall</code> and <code>ctx.load()</code> are wrappers around <code>seccomp_init</code>, <code>seccomp_rule_add</code>, and <code>seccomp_load</code>.</p>
+<pre><pre class="playground"><code class="language-rust">use libc::getpid;
+use syscallz::{Action, Context, Syscall};
+
+fn main() {
+    println!(&quot;pid (first attempt):, {}&quot;, unsafe { getpid() });
+
+    match Context::init_with_action(Action::Allow) {
+        Ok(mut ctx) =&gt; {
+            ctx.set_action_for_syscall(Action::Errno(100), Syscall::getpid)
+                .unwrap();
+            ctx.load().unwrap();
+        }
+        Err(e) =&gt; {
+            println!(&quot;Failed to init with action: {:?}&quot;, e);
+        }
+    }
+
+    println!(&quot;pid (second attempt):, {}&quot;, unsafe { getpid() });
+}</code></pre></pre>
+<p>Compiling and executing the code above yields the following, where <code>-100</code> is the corresponding error code.</p>
+<pre><code class="language-docker">pid (first attempt):, 6613
+pid (second attempt):, -100
+</code></pre>
+<h3 id="implementation-1"><a class="header" href="#implementation-1">Implementation</a></h3>
+<p>For my project, I disabled the same set of syscalls that <a href="https://blog.lizzie.io/linux-containers-in-500-loc.html#org8504d16">Lizzie’s implementation</a> of container disables. Here is the implementation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>const DISABLED_SYSCALLS: [Syscall; 9] = [
+    Syscall::keyctl,
+    Syscall::add_key,
+    Syscall::request_key,
+    Syscall::ptrace,
+    Syscall::mbind,
+    Syscall::migrate_pages,
+    Syscall::set_mempolicy,
+    Syscall::userfaultfd,
+    Syscall::perf_event_open,
+];
+
+fn syscalls() -&gt; ContainerResult {
+    println!(&quot;Disabling syscalls!&quot;);
+
+    let s_isuid: u64 = Mode::S_ISUID.bits().into();
+    let s_isgid: u64 = Mode::S_ISGID.bits().into();
+    let clone_newuser = CloneFlags::CLONE_NEWUSER.bits() as u64;
+
+    // Each tuple: (SysCall, argument_idx, value). 0 would be the first argument index.
+    let conditional_syscalls = [
+        (Syscall::fchmod, 1, s_isuid),
+        (Syscall::fchmod, 1, s_isgid),
+        (Syscall::fchmodat, 2, s_isuid),
+        (Syscall::fchmodat, 2, s_isgid),
+        (Syscall::unshare, 0, clone_newuser),
+        (Syscall::clone, 0, clone_newuser),
+        // TODO: ioctl causes an error when running /bin/ash somehow...
+        // (Syscall::ioctl, 1, TIOCSTI),
+    ];
+    match Context::init_with_action(Action::Allow) {
+        Ok(mut ctx) =&gt; {
+            for syscall in DISABLED_SYSCALLS {
+                if let Err(err) = ctx.set_action_for_syscall(Action::Errno(0), syscall) {
+                    println!(&quot;Failed to disable syscall: {:?}. Error: {:?}&quot;, syscall, err);
+                    return Err(ContainerError::DisableSyscall);
+                };
+            }
+
+            for (syscall, arg_idx, bit) in conditional_syscalls {
+                if let Err(err) = ctx.set_rule_for_syscall(
+                    Action::Errno(1000),
+                    syscall,
+                    &amp;[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
+                ) {
+                    println!(&quot;Failed to disable syscall: {:?}. Error: {:?}&quot;, syscall, err);
+                    return Err(ContainerError::DisableSyscall);
+                }
+            }
+
+            if let Err(err) = ctx.load() {
+                println!(&quot;Failed to load syscall disabling: {:?}&quot;, err);
+                return Err(ContainerError::DisableSyscall);
+            };
+        }
+        Err(err) =&gt; {
+            println!(&quot;Failed to open seccomp context: {:?}&quot;, err);
+            return Err(ContainerError::DisableSyscall);
+        }
+    }
+
+    println!(&quot;Finished disabling syscalls!&quot;);
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p><code>seccomp_rule_add_array</code> allows developers to filter a syscall based on specific argument values by providing a comparator. Here is the code I used to perform conditional filters:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>ctx.set_rule_for_syscall(
+    Action::Errno(1000),
+    syscall,
+    &amp;[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
+)
+<span class="boring">}</span></code></pre></pre>
+<p>For example, to error our when <code>unshare</code> is invoked when it contains the <code>clone_newuser</code> bit, we can provide a <code>Comparator</code> to <code>set_rule_for_syscall</code> like this:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let clone_newuser = CloneFlags::CLONE_NEWUSER.bits() as u64;
+ctx.set_rule_for_syscall(
+    Action::Errno(1000),
+    Syscall::unshare,
+    &amp;[Comparator::new(0, Cmp::MaskedEq, clone_newuser, Some(clone_newuser))],
+);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation-1"><a class="header" href="#testing-the-implementation-1">Testing the Implementation</a></h3>
+<p>Now, let’s test whether our implementation works. In this test, we will confirm that performing <code>unshare</code> works without the <code>CLONE_NEWUSER</code> flag but fails with the <code>CLONE_NEWUSER</code> flag.</p>
+<p>First, let’s confirm that <code>unshare</code> works when there are no flags set. Here is the <code>unshare_test</code> program:</p>
+<pre><code class="language-docker">use nix::sched::{unshare, CloneFlags};
+
+fn main() {
+    match unshare(CloneFlags::empty()) {
+        Ok(_) =&gt; println!(&quot;Unshared success!&quot;),
+        Err(e) =&gt; println!(&quot;Error: {:?}&quot;, e),
+    }
+}
+</code></pre>
+<p>After compiling the binary for <code>unshare_test</code>, we need to copy the executable into the <code>alpine</code> directory before running the program in the container.</p>
+<pre><code class="language-docker"># inside the unshare_test repo
+RUSTFLAGS=&quot;-C target-feature=+crt-static&quot; cargo build --target=&quot;aarch64-unknown-linux-gnu&quot;
+cp target/aarch64-unknown-linux-gnu/debug/unshare_test /home/brianshih/alpine
+
+# navigate to mini-container repo
+sudo target/debug/mini-container /unshare_test /home/brianshih/alpine
+# Unshared Success!
+</code></pre>
+<p>Based on the output of running the executable in the container environment, we’ve confirmed that <code>unshare</code> works when there are no flags set.</p>
+<p>Now, let’s see what will happen if performing <code>unshare</code> with the <code>CLONE_NEWUSER</code> flag works with the following code:</p>
+<pre><code class="language-docker">use nix::sched::{unshare, CloneFlags};
+
+fn main() {
+    match unshare(CloneFlags::CLONE_NEWUSER) {
+        Ok(_) =&gt; println!(&quot;Unshared success!&quot;),
+        Err(e) =&gt; println!(&quot;Error: {:?}&quot;, e),
+    }
+}
+</code></pre>
+<p>After compiling and copying the executable to the target root filesystem, I ran the executable in the container environment:</p>
+<pre><code class="language-docker">sudo target/debug/mini-container /unshare_test /home/brianshih/alpine
+# Error: UnknownErrno
+</code></pre>
+<p>Based on the output, we have confirmed that it works.</p>
+<p>To check which <code>Seccomp</code> mode and how many <code>seccomp filters</code> there are, you can perform <code>grep Seccomp /proc/{pid}/status</code> like follows:</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /bin/ash /home/brianshih/alpine
+# ...
+# Child pid: Pid(6381)
+
+# Host system
+grep Seccomp /proc/6381/status
+# Seccomp:	2
+# Seccomp_filters:	1
+</code></pre>
+<p>Here, we can see that <code>Seccomp</code> is in the filter mode and there is one filter since our code only initializes and loads one filter.</p>
+<h3 id="additional-resources-1"><a class="header" href="#additional-resources-1">Additional Resources</a></h3>
+<p><a href="https://wiki.mozilla.org/Security/Sandbox/Seccomp">Intro to Seccomp and Seccomp-bpf</a></p>
+<p><a href="https://wiki.mozilla.org/Security/Sandbox/Seccomp">Mozilla wiki - Seccomp</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="capabilities"><a class="header" href="#capabilities">Capabilities</a></h1>
+<h3 id="goal-2"><a class="header" href="#goal-2">Goal</a></h3>
+<p>We want to granularly control and limit the privileges of processes within a container.</p>
+<h3 id="theory-2"><a class="header" href="#theory-2">Theory</a></h3>
+<p>Traditionally, processes run with either a full set of privileges granted by the root user or with a limited set of privileges granted by the process’s user and groups.</p>
+<p>However, sometimes a program needs to be run by an unprivileged user but be able to make privileged calls. In that case, the <a href="https://www.redhat.com/sysadmin/suid-sgid-sticky-bit">suid bit</a> would be set on the file, which will cause the file to be executed by the user who owns the file. This makes the program susceptible to privilege escalation attacks.</p>
+<p>Linux Capabilities are introduced as a mechanism that allows a process to perform privileged operations without being granted superuser access. Rather than a single privilege, the superuser privilege is divided into distinct units known as capabilities.</p>
+<p><strong>Rules of Capabilities</strong></p>
+<p>In Linux, both processes and files (executables) can have capabilities. So what capabilities are granted when a file is executed by a process? For that, we need to first introduce the concept of capabilities set.</p>
+<p>Each process stores 5 different sets of capabilities (based on the <a href="https://www.notion.so/Capabilities-04f91e967ee9426eb354611b98364ede?pvs=21">“Thread capability sets” section in the Linux doc</a>):</p>
+<ul>
+<li><strong>Effective</strong>: The kernel will run permission checks against effective capabilities. If the capability for a privileged operation is not set, a permission error will be thrown.</li>
+<li><strong>Permitted</strong>: superset for the effective capabilities. The process can transition it to the effective set dynamically.</li>
+<li><strong>Inheritable</strong>: capabilities inside the inheritable set will be added to the permitted set when a program is executed via the <code>execve</code> syscall</li>
+<li><strong>Bounding</strong>: the superset of all the capabilities. If a capability is not inside the bounded set, it is not allowed</li>
+<li><strong>Ambient</strong>: a set of capabilities preserved across an execve call that is not privileged. No capability can be ambient if it is not both permitted and inheritable.</li>
+</ul>
+<p>Here is a screenshot from the Linux <a href="https://man7.org/linux/man-pages/man7/capabilities.7.html">doc</a> about how the different Linux capabilities will transform across <code>execve</code> calls:</p>
+<p><img src="https://prod-files-secure.s3.us-west-2.amazonaws.com/552ab37c-e9e7-4e4e-b079-a27f36afc8b3/c39cf7c4-dd28-402d-a64d-fbbc98ebfcfa/Screenshot_2023-12-20_at_1.32.44_AM.png" alt="Screenshot 2023-12-20 at 1.32.44 AM.png" /></p>
+<p>If a user wants to execute a file that needs capability <code>X</code>, the user needs X to be inside <code>P'(effective)</code>. In the 2 demos below, we will demonstrate how we can achieve that for different types of files.</p>
+<h3 id="demo-2"><a class="header" href="#demo-2">Demo</a></h3>
+<p><strong>Demo 1: Gaining Capabilities from Executables</strong></p>
+<p>One of the Linux Capabilities is <code>CAP_NET_BIND_SERVICE</code>, which determines whether a process can bind a socket to a Internet domain privileged ports (port number less than 1024).</p>
+<p>To start off, I’ve created a Rust project with the following code. All this code snippet does is that it tries to create a <code>TcpListener</code> and bind it to a privileged address (80).</p>
+<pre><pre class="playground"><code class="language-rust">use std::net::TcpListener;
+
+fn main() {
+    let listener = TcpListener::bind(&quot;127.0.0.1:80&quot;).unwrap();
+	  println!(&quot;TcpListner bound to 127.0.0.1:80. Accepting incoming connection&quot;):
+		listener.accept();
+}</code></pre></pre>
+<p>When we run this code, we will get this error:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>Error: Os { code: 13, kind: PermissionDenied, message: &quot;Permission denied&quot; }
+<span class="boring">}</span></code></pre></pre>
+<p>This is because normal processes have 0 capabilities. To verify this, we can look at <code>/proc/$$/status</code> to see that the <code>CAP_NET_BIND_SERVICE</code> bit is not in <code>CapEff</code>.</p>
+<pre><code class="language-bash">grep Cap /proc/$$/status
+# CapInh:	0000000000000000
+# CapPrm:	0000000000000000
+# CapEff:	0000000000000000
+# CapBnd:	000001ffffffffff
+# CapAmb:	0000000000000000
+</code></pre>
+<p>Now, let’s think about how we can grant capability to the process running the file.</p>
+<p>Firstly, the file is clearly not capability-aware. Capability aware programs are programs that understand and manipulate capabilities through calls to <a href="https://man7.org/linux/man-pages/man3/libcap.3.html">libcap</a> syscalls.</p>
+<p>Therefore, in order for the <code>CAP_NET_BIND_SERVICE</code> capability to be inside the thread’s effective capability set after the <code>execve</code> call, one way is to add the capability to the file’s effective set and permitted set.</p>
+<pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
+P'(permitted) = (P(inheritable) &amp; F(inheritable)) | (F(permitted) &amp; cap_bset) | P'(ambient)
+</code></pre>
+<p>If <code>F(effective)</code> is valid, we can perform the following algebra:</p>
+<pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
+</code></pre>
+<p>⇒  <code>P'(effective) = P'(permitted)</code></p>
+<p>⇒ <code>P'(effective) = (F(permitted) &amp; cap_bset)</code></p>
+<p>Since the capability is inside <code>F(effective)</code> and <code>F(premitted)</code>, it will also be inside <code>P'(effective)</code>.</p>
+<p>Now let’s try setting the <code>CAP_NET_BIND_SERVICE</code> to the file and re-run it.</p>
+<pre><code class="language-bash">sudo setcap 'cap_net_bind_service=+ep' target/debug/hello_world
+getcap target/debug/hello_world
+# target/debug/hello_world cap_net_bind_service=ep
+target/debug/hello_world
+# TcpListener bound to 127.0.0.1:80. Accepting incoming connection
+</code></pre>
+<p>To grant a capability, we will use the <a href="https://man7.org/linux/man-pages/man8/setcap.8.html">setcap</a> syscall. To verify that the capability is set, we use the <a href="https://man7.org/linux/man-pages/man8/getcap.8.html">getcap</a> syscall. After setting the capability, we can bound the TcpListener to port 80.</p>
+<p><strong>Demo 2: Capability-aware files</strong></p>
+<p>Ideally, we would like to create an environment that doesn’t require giving the process root user privileges or granting the file capabilities.</p>
+<p>Let’s look at this equation again:</p>
+<pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
+</code></pre>
+<p>If we don’t set the <code>F(effective)</code> bit, then we need to ensure that <code>P'(ambient)</code> contains the capability bit. To do that, we need to create a capability-aware file.  Capability aware files can use the <a href="https://man7.org/linux/man-pages/man2/prctl.2.html">prctl</a> calls to add capabilities to capability sets.</p>
+<p>For example, <code>prctl</code> with arguments of <code>PR_CAP_AMBIENT</code> <code>PR_CAP_AMBIENT_RAISE</code> can add capabilities to the ambient set. According to prctl’s Linux doc, <code>PR_CAP_AMBIENT_RAISE</code> adds the capability specified in arg3 to the ambient set and “the specified capability must already be present in both the permitted and the inheritable sets of the process”.</p>
+<p>As a result, we need to add the capability to the inheritable set of the thread before adding it to the ambient set of the thread. We will add the capability to <code>F(permitted)</code> manually since I can’t seem to add it with <code>prctl</code> directly (I’m still going through the docs to find out why this is happening!).</p>
+<p>Here is the <code>set-ambient</code> program (inspired by this <a href="https://blog.container-solutions.com/linux-capabilities-in-practice">blog</a>) to do that:</p>
+<pre><pre class="playground"><code class="language-rust">use std::{env, ffi::CString};
+
+use nix::unistd::execve;
+
+fn set_ambient() {
+    caps::raise(
+        None,
+        caps::CapSet::Inheritable,
+        caps::Capability::CAP_NET_BIND_SERVICE,
+    )
+    .unwrap();
+
+    caps::raise(
+        None,
+        caps::CapSet::Ambient,
+        caps::Capability::CAP_NET_BIND_SERVICE,
+    )
+    .unwrap();
+}
+
+fn main() {
+    let args: Vec&lt;String&gt; = env::args().collect();
+    set_ambient();
+
+    println!(&quot;CAP_NET_BIND_SERVICE is in ambient capabilities. Executing file.&quot;);
+    if let Err(e) = execve::&lt;CString, CString&gt;(&amp;CString::new(args[1].clone()).unwrap(), &amp;[], &amp;[]) {
+        println!(&quot;Failed to execve: {:?}&quot;, e);
+    }
+}</code></pre></pre>
+<p>We use the <a href="https://crates.io/crates/caps">caps crate</a> to set the capabilities. The call <code>caps::raise(None, Ambient, CAP_NET_BIND_SERVICE)</code> is a wrapper around the Linux call <code>prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, NET_BIND_SERVICE)</code>.</p>
+<p>As specified earlier, the capability must be present in both the permitted and the inheritable sets of the process. Therefore, we use <code>sudo setcap</code> to add the capability to the permitted set of the file.</p>
+<p>After setting the capability bit for <code>NET_BIND_SERVICE</code> to the permission capability set of the file, let’s run <code>/bin/bash</code> with the <code>set-ambient</code> program. We can check the capability sets of the process via <code>grep Cap /proc/$$/status</code> and see that the effective bits for the process is <code>0000000000000400</code>. Finally, we can use <code>capsh --decode</code> to confirm that <code>cap_net_bind_service</code> is in the process’s effective set.</p>
+<pre><code class="language-bash">sudo setcap cap_net_bind_service+p target/debug/set-ambient
+target/debug/set-ambient /bin/bash
+# CAP_NET_BIND_SERVICE is in ambient capabilities. Executing file.
+grep Cap /proc/$$/status
+# CapInh:	0000000000000400
+# CapPrm:	0000000000000400
+# CapEff:	0000000000000400
+# CapBnd:	000001ffffffffff
+# CapAmb:	0000000000000400
+capsh --decode=0000000000000400
+# 0x0000000000000400=cap_net_bind_service
+</code></pre>
+<p>Finally, we can run the file with the <code>TcpListener</code> again and this time, we can bound the listener to port 80.</p>
+<pre><code class="language-bash">target/debug/set-ambient ../tcp_example/target/debug/tcp_example
+# TcpListener bound to 127.0.0.1:80. Accepting incoming connection
+</code></pre>
+<h3 id="implementation-2"><a class="header" href="#implementation-2">Implementation</a></h3>
+<p>My implementation takes in a list of capabilities to add and a list of capabilities to drop. If <code>ALL</code> is specified in <code>cap-drop</code>, then all capabilities are dropped.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
+	--cap-drop ALL 
+	--cap-add NET_BIND_SERVICE CAP_SETUID
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the pseudocode for the implementation:</p>
+<ul>
+<li>for each capabilities to drop, drop them. If the capability specified is <code>ALL</code>, then loop through any capabilities in the bounding set unless it’s inside the capabilities to add</li>
+<li>loop through the capabilities to add and add the capability set to the inheritable set and the ambient set.</li>
+</ul>
+<p>Here is the actual code:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>static CAPABILITIES: phf::Map&lt;&amp;'static str, Capability&gt; = phf_map! {
+    &quot;NET_BIND_SERVICE&quot; =&gt; caps::Capability::CAP_NET_BIND_SERVICE,
+    &quot;SETUID&quot; =&gt; caps::Capability::CAP_SETUID,
+    &quot;CAP_SYS_TIME&quot; =&gt; caps::Capability::CAP_SYS_TIME,
+};
+
+fn capabilities(config: &amp;ChildConfig) -&gt; ContainerResult {
+    // compute the list of capabilities to add
+    let caps_add: Vec&lt;Capability&gt; = match &amp;config.cap_add {
+        Some(cap_add) =&gt; {
+            let mut res = vec![];
+            for c in cap_add.iter() {
+                match CAPABILITIES.get(c) {
+                    Some(c) =&gt; {
+                        res.push(c.clone());
+                    }
+                    None =&gt; {
+                        return Err(ContainerError::CapabilityAdd);
+                    }
+                }
+            }
+            res
+        }
+        None =&gt; vec![],
+    };
+
+    // if ALL is inside the capabilities to drop, then drop all capabilities except
+    // for the ones inside capabilities to add
+    if let Some(caps) = &amp;config.cap_drop {
+        if caps.contains(&amp;String::from(&quot;ALL&quot;)) {
+            let bounding_caps = caps::read(None, caps::CapSet::Bounding).unwrap();
+            for cap in bounding_caps.iter() {
+                if !caps_add.contains(cap) {
+                    if let Err(e) = caps::drop(None, caps::CapSet::Bounding, *cap) {
+                        return Err(ContainerError::CapabilityDrop);
+                    }
+                }
+            }
+        } else {
+            for c in caps.iter() {
+                match CAPABILITIES.get(c) {
+                    Some(c) =&gt; {
+                        if let Err(e) = caps::drop(None, caps::CapSet::Bounding, *c) {
+                            return Err(ContainerError::CapabilityDrop);
+                        }
+                        if let Err(e) = caps::drop(None, caps::CapSet::Inheritable, *c) {
+                            return Err(ContainerError::CapabilityDrop);
+                        }
+                    }
+                    None =&gt; {
+                        return Err(ContainerError::CapabilityDrop);
+                    }
+                }
+            }
+        }
+    }
+
+    for cap in caps_add.iter() {
+        if let Err(e) = caps::raise(None, caps::CapSet::Inheritable, *cap) {
+            return Err(ContainerError::CapabilityAdd);
+        }
+        if let Err(e) = caps::raise(None, caps::CapSet::Ambient, *cap) {
+            return Err(ContainerError::CapabilityAdd);
+        }
+    }
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation-2"><a class="header" href="#testing-the-implementation-2">Testing the Implementation</a></h3>
+<p>Let’s first confirm that dropping all capabilities and adding <code>NET_BIND_SERVICE</code> works.</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
+	--cap-drop ALL 
+	--cap-add NET_BIND_SERVICE
+# Child pid: Pid(6517)
+# ...
+
+# host system
+grep Cap /proc/6517/status
+# CapInh:	0000000000000400
+# CapPrm:	0000000000000400
+# CapEff:	0000000000000400
+# CapBnd:	000001ffffffffff
+# CapAmb:	0000000000000400
+capsh --decode=0000000000000400
+# 0x0000000000000400=cap_net_bind_service
+</code></pre>
+<p>Next, I built a Rust program with this code. All it does is that it prints out the capability sets of the process and runs <code>setresuid</code>, which is granted if the <code>SETUID</code> capability is set.</p>
+<pre><pre class="playground"><code class="language-rust">use nix::unistd::{setresuid, Uid};
+
+fn main() {
+    println!(&quot;Effective {:?}&quot;, caps::read(None, caps::CapSet::Effective));
+    println!(&quot;Bounding {:?}&quot;, caps::read(None, caps::CapSet::Bounding));
+    println!(
+        &quot;Inherited {:?}&quot;,
+        caps::read(None, caps::CapSet::Inheritable)
+    );
+    println!(&quot;Permitted {:?}&quot;, caps::read(None, caps::CapSet::Permitted));
+    println!(&quot;Ambient {:?}&quot;, caps::read(None, caps::CapSet::Ambient));
+
+    if let Err(e) = setresuid(Uid::from_raw(10), Uid::from_raw(10), Uid::from_raw(10)) {
+        println!(&quot;Failed to setuid: {:?}&quot;, e);
+    }
+    println!(&quot;Finished&quot;);
+}</code></pre></pre>
+<p>Next, let’s compile it and copy it to the alpine directory. Then we run the program in the container. We get an <code>EPERM</code> error. If we look at the logged lines, we can see that <code>CAP_SETUID</code> is not in the effective set of the process.</p>
+<pre><code class="language-bash"># compile it
+RUSTFLAGS=&quot;-C target-feature=+crt-static&quot; cargo build --target=&quot;aarch64-unknown-linux-gnu&quot;
+# copy it to the alpine directory
+cp target/aarch64-unknown-linux-gnu/debug/setuid_example /home/brianshih/alpine
+sudo target/debug/mini-container /setuid_example /home/brianshih/alpine
+# Effective Ok({})
+# Bounding Ok({CAP_SETGID, CAP_AUDIT_WRITE, CAP_SYS_RESOURCE, CAP_SETFCAP, CAP_BLOCK_SUSPEND, CAP_SYS_TTY_CONFIG, CAP_AUDIT_CONTROL, CAP_SYS_NICE, CAP_CHOWN, CAP_LEASE, CAP_MAC_OVERRIDE, CAP_FOWNER, CAP_BPF, CAP_SYS_BOOT, CAP_WAKE_ALARM, CAP_NET_BIND_SERVICE, CAP_IPC_OWNER, CAP_NET_BROADCAST, CAP_PERFMON, CAP_FSETID, CAP_SYS_ADMIN, CAP_SYSLOG, CAP_LINUX_IMMUTABLE, CAP_KILL, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SYS_CHROOT, CAP_SYS_PACCT, CAP_SYS_RAWIO, CAP_SETUID, CAP_NET_RAW, CAP_AUDIT_READ, CAP_CHECKPOINT_RESTORE, CAP_SYS_TIME, CAP_MKNOD, CAP_SYS_PTRACE, CAP_MAC_ADMIN, CAP_DAC_OVERRIDE, CAP_IPC_LOCK, CAP_SETPCAP, CAP_SYS_MODULE})
+# Inherited Ok({})
+# Permitted Ok({})
+# Ambient Ok({})
+# Failed to setuid: EPERM
+ 
+</code></pre>
+<p>However, if we rerun the program with <code>--cap-add SETUID</code>, the program runs without error. If we look at the logged lines, we can see that <code>CAP_SETUID</code> is in the effective capability set of the process.</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /setuid_example /home/brianshih/alpine 
+		--cap-add SETUID
+# Effective Ok({CAP_SETUID})
+# Bounding Ok({CAP_SETFCAP, CAP_BPF, CAP_MKNOD, CAP_CHOWN, CAP_SETUID, CAP_SYS_TIME, CAP_FSETID, CAP_NET_ADMIN, CAP_SYS_CHROOT, CAP_LINUX_IMMUTABLE, CAP_IPC_LOCK, CAP_SYS_NICE, CAP_SYS_RAWIO, CAP_SETGID, CAP_KILL, CAP_DAC_OVERRIDE, CAP_CHECKPOINT_RESTORE, CAP_SYS_PACCT, CAP_SYS_PTRACE, CAP_MAC_ADMIN, CAP_WAKE_ALARM, CAP_AUDIT_WRITE, CAP_MAC_OVERRIDE, CAP_LEASE, CAP_SYS_RESOURCE, CAP_IPC_OWNER, CAP_FOWNER, CAP_SYS_MODULE, CAP_BLOCK_SUSPEND, CAP_AUDIT_CONTROL, CAP_AUDIT_READ, CAP_PERFMON, CAP_SYSLOG, CAP_NET_RAW, CAP_SYS_ADMIN, CAP_NET_BROADCAST, CAP_SYS_TTY_CONFIG, CAP_SETPCAP, CAP_NET_BIND_SERVICE, CAP_DAC_READ_SEARCH, CAP_SYS_BOOT})
+# Inherited Ok({CAP_SETUID})
+# Permitted Ok({CAP_SETUID})
+# Ambient Ok({CAP_SETUID})
+</code></pre>
+<h3 id="additional-resources-2"><a class="header" href="#additional-resources-2">Additional Resources</a></h3>
+<ul>
+<li><a href="https://blog.container-solutions.com/linux-capabilities-why-they-exist-and-how-they-work">Linux capabilities - why they exist and how they work</a></li>
+<li><a href="https://blog.container-solutions.com/linux-capabilities-in-practice">Linux capabilities in practice</a></li>
+<li><a href="https://www.redhat.com/en/blog/linux-capabilities-in-openshift">Redhat blog - Linux Capabilities</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="user-namespace"><a class="header" href="#user-namespace">User Namespace</a></h1>
+<h3 id="goal-3"><a class="header" href="#goal-3">Goal</a></h3>
+<p>The best way to prevent privilege-escalation attacks from within a container is to run the container’s executable as an unprivileged user. However, some applications require the process to run as a <code>root</code> user. Therefore, our goal is to set up an environment such that the user within the container is privileged but unprivileged to the host system.</p>
+<h3 id="theory-3"><a class="header" href="#theory-3">Theory</a></h3>
+<p>User Namespaces isolate security-related identifiers. According to <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html">Linux’s doc</a>, “a process’s user and group IDs can be different inside and outside a namespace. In particular, a process can have a normal unprivileged user ID outside a user namespace while at the same time having a user ID of 0 inside the namespace”.</p>
+<p>Furthermore, user namespaces are nested. Apart from the root namespace, each namespace has a parent namespace, which is the user namespace of the process that created the user namespace via a call to <code>unshare</code> or <code>clone</code> with the <code>CLONE_NEWUSER</code> flag.</p>
+<p>The user namespace is what enables a container to run as a <code>root</code> user within a container but have unprivileged access outside the container, which prevents privilege-escalation attacks.</p>
+<p><strong>User mappings</strong></p>
+<p>When a user namespace is created, it starts without a mapping of User IDs to the parent user namespace. The <code>/proc/pid/uid_map</code>, which resides in the parent user namespace, maps the User IDs inside the parent user namespace to the User IDs inside the child user namespace.</p>
+<p>Each line in the <code>uid_map</code> takes the form:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>ID-in-child-ns   ID-in-parent-ns   length
+<span class="boring">}</span></code></pre></pre>
+<p><code>ID-in-child-ns</code>,  <code>ID-in-parent-ns</code>, and <code>length</code> specifies that a range of user IDs of <code>length</code> starting from <code>ID-in-child-ns</code> are mapped to a range of user IDs of <code>length</code> in the parent user namespace starting with <code>ID-in-parent-ns</code>.</p>
+<p>For example, a line of <code>0 1000 1</code> means that the user with <code>User ID 0</code> in the child user namespace maps to the user with <code>User ID 1000</code>.</p>
+<h3 id="demo-3"><a class="header" href="#demo-3">Demo</a></h3>
+<p>In the demo below, we first create a user namespace with the <code>-U</code> flag. According to the <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html">Linux doc</a>, an unmapped User ID is converted to the overflow user ID which is <code>65534</code>. This is why the <code>uid=65534</code>. However, when we check the <code>User ID</code> for the process via <code>ps -o 'pid uid user command' -a</code>, we can see that the UID is <code>1000</code>, the same User as the parent process’s user.</p>
+<p>After retrieving the <code>pid</code> of the child process via <code>echo $$</code>, we write <code>0 1000 1</code> into the <code>uid_map</code> of the parent user namespace. We then check the <code>user ID</code> of the child process and now see <code>0</code>.</p>
+<p>Even though the User ID of the child process is <code>0</code>, if we check the <code>uid</code> from the parent user namespace, it’s still 1000. We have successfully mapped the original user ID of <code>1000</code> to <code>0</code> in the new user namespace.</p>
+<pre><code class="language-bash">id
+# uid=1000(brianshih) gid=1000(brianshih) groups=1000(brianshih) ...
+unshare -U
+id
+# uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+echo $$
+# 10087
+
+# host system
+ps -o 'pid uid user command' -a
+# PID   UID USER     COMMAND
+10087  1000 briansh+ -bash
+echo '0 1000 1' &gt; /proc/10087/uid_map
+
+# in the child process
+id
+# uid=0(root) gid=65534(nogroup) groups=65534(nogroup)
+
+# host system
+ps -o 'pid uid user command' -a
+# PID    UID  USER     COMMAND
+# 10087  1000 briansh+ -bash
+</code></pre>
+<h3 id="implementation-3"><a class="header" href="#implementation-3">Implementation</a></h3>
+<p>The implementation is split into two portions:</p>
+<ul>
+<li><code>user_ns</code>: creating a new user namespace in the child process</li>
+<li><code>handle_child_uid_map</code>: updating to the <code>uid_map</code> in the parent process.</li>
+</ul>
+<p>We can see that in the <code>run</code> method below, we <code>handle_child_uid_map</code> method is run after <code>create_child_process</code>. This is because to write to the <code>uid_map</code>, the parent process needs the newly created process’s <code>pid</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn run() -&gt; ContainerResult {
+    ...
+
+    let child_pid = create_child_process(&amp;config)?;
+
+    handle_child_uid_map(child_pid, parent_socket.as_raw_fd(), config.user_id.clone())?;
+    ...
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the code to create a new user namespace with <code>unshare</code>. After creating the new user namespace, the child process notifies the parent process that the child process has created a new user namespace. Next, the child process waits until the parent updates the <code>uid_map</code> before using <code>setresuid</code> to set the new <code>user_id</code>, which is likely <code>0</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn user_ns(config: &amp;ChildConfig) -&gt; ContainerResult {
+    if let Err(e) = unshare(CloneFlags::CLONE_NEWUSER) {
+        println!(&quot;Failed to unshare with new user namespace: {:?}&quot;, e);
+        return Err(ContainerError::UnshareNewUser);
+    }
+
+    // Notifies the parent process that the child process has created a new user namespace
+    socket_send(config.socket_fd)?;
+
+    // Wait for the parent process to update the uid_map before setting the uid
+
+    socket_recv(config.socket_fd)?;
+
+    if let Some(user_id) = config.user_id {
+        println!(&quot;Setting UID to: {:?}&quot;, config.user_id);
+        if let Err(e) = setresuid(
+            Uid::from_raw(user_id),
+            Uid::from_raw(user_id),
+            Uid::from_raw(user_id),
+        ) {
+            println!(&quot;Failed to set uid. Error: {:?}&quot;, e);
+            return Err(ContainerError::SetResuid);
+        };
+    }
+
+    Ok(())
+<span class="boring">}</span></code></pre></pre>
+<p>Here is the code for how the parent updates the <code>uid_map</code>. It first waits for the user to create a user namespace via <code>socket_recv</code>. It then writes to the <code>uid_map</code> file and <code>gid_map</code> file. Finally, it uses <code>socket_send</code> to notify the child that the <code>uid_map</code> is updated.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn handle_child_uid_map(pid: Pid, fd: i32, user_id: Option&lt;u32&gt;) -&gt; ContainerResult {
+    // Wait for the user to create a user namespace
+    socket_recv(fd)?;
+
+    let user_id = match user_id {
+        Some(id) =&gt; id,
+        None =&gt; 0, // default to run as root if no user ID is provided
+    };
+
+    println!(&quot;Updating uid_map&quot;);
+    match File::create(format!(&quot;/proc/{}/{}&quot;, pid.as_raw(), &quot;uid_map&quot;)) {
+        Ok(mut uid_map) =&gt; {
+            if let Err(e) = uid_map.write_all(format!(&quot;0 {} {}&quot;, 1000, 1000).as_bytes()) {
+                println!(&quot;Failed to write to uid_map. Error: {:?}&quot;, e);
+                return Err(ContainerError::UidMap);
+            }
+        }
+        Err(e) =&gt; {
+            println!(&quot;Failed to create uid_map. Error: {:?}&quot;, e);
+            return Err(ContainerError::UidMap);
+        }
+    }
+
+    match File::create(format!(&quot;/proc/{}/{}&quot;, pid.as_raw(), &quot;gid_map&quot;)) {
+        Ok(mut uid_map) =&gt; {
+            if let Err(e) = uid_map.write_all(format!(&quot;0 {} {}&quot;, 1000, 1000).as_bytes()) {
+                println!(&quot;Failed to write to uid_map. Error: {:?}&quot;, e);
+                return Err(ContainerError::UidMap);
+            }
+        }
+        Err(e) =&gt; {
+            println!(&quot;Failed to create uid_map. Error: {:?}&quot;, e);
+            return Err(ContainerError::UidMap);
+        }
+    }
+
+    println!(&quot;Finished updating uid_map. Notifying child process&quot;);
+
+    // Notify the user that the uid_map is updated
+    socket_send(fd)?;
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation-3"><a class="header" href="#testing-the-implementation-3">Testing the Implementation</a></h3>
+<p>We create the container environment and set the new user ID to 0 via <code>--user 0</code>. We then confirm that <code>id</code> inside the container is <code>0</code>.</p>
+<p>In the host system, we confirm that the process used to run the executable, <code>/bin/ash</code> has a UID of <code>1000</code>. This confirms that the <code>uid_mapping</code> worked.</p>
+<pre><code class="language-bash">id
+# uid=1000(brianshih) ...
+sudo target/debug/mini-container /bin/ash /home/brianshih/alpine --user 0
+id
+# uid=0(root)
+
+# host system
+ps -o 'pid uid user command' -a
+
+# PID    UID  USER     COMMAND
+# 10074  0    root     target/debug/mini-container /bin/ash /home/brianshih/alpi
+# 10075  1000 briansh+ /bin/ash
+</code></pre>
+<h3 id="additional-resources-3"><a class="header" href="#additional-resources-3">Additional Resources</a></h3>
+<ul>
+<li><a href="https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/namespaces/user-namespace">Blog about docker security - user namespace</a></li>
+<li><a href="https://lwn.net/Articles/532593/">Namespaces in operation, part 5: User namespaces</a></li>
+<li><a href="https://docs.docker.com/engine/security/userns-remap/">Docker blog - Isolate containers with a user namespace</a></li>
+<li><a href="https://dockerlabs.collabnix.com/advanced/security/userns/">Demo of how user namespace works with Docker</a></li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="resource-restrictions"><a class="header" href="#resource-restrictions">Resource Restrictions</a></h1>
-<div style="break-before: page; page-break-before: always;"></div><h1 id="resource-restrictions-1"><a class="header" href="#resource-restrictions-1">Resource Restrictions</a></h1>
+<h3 id="goal-4"><a class="header" href="#goal-4">Goal</a></h3>
+<p>We want to limit and isolate resource usage such as CPU, memory, disk I/O, network, etc in a container.</p>
+<h3 id="theory-4"><a class="header" href="#theory-4">Theory</a></h3>
+<p><a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">Cgroups</a> is a Linux kernel feature that allows developers to control how much of a given key resource (CPU, memory, etc) a process or a set of processes can access.</p>
+<p>According to the <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">Linux doc</a>, the grouping of processes is provided through a pseudo-filesystem called <code>cgroupfs</code>. A cgroup is a collection of processes bound to a set of limits defined via the cgroup filesystem.</p>
+<p>Each cgroup has a kernel component called a <em>subsystem</em>, also known as a resource controller.</p>
+<p>Different subsystems limit different resources, such as the CPU time and memory available to a cgroup. To create a cgroup, you create a directory inside the <code>cgroup</code> filesystem:</p>
+<pre><code>mkdir /sys/fs/cgroup/cg1
+</code></pre>
+<p>Each file inside the <code>cgroup</code> directory corresponds to a different resource that can be limited. For example, the <code>cgroup</code> below contains files such as <code>memory.max</code> which limits the memory a cgroup can access.</p>
+<pre><code class="language-bash">ls /sys/fs/cgroup/cg1
+# cgroup.controllers      cpuset.cpus.partition  memory.max
+# cgroup.events           cpuset.mems            memory.min
+# cgroup.freeze           cpuset.mems.effective  memory.numa_stat
+# cgroup.kill             cpu.stat               memory.oom.group
+# cgroup.max.depth        cpu.uclamp.max         memory.peak
+# cgroup.max.descendants  cpu.uclamp.min         memory.pressure
+# cgroup.pressure         cpu.weight             memory.reclaim
+# ... many more
+</code></pre>
+<h3 id="demo-4"><a class="header" href="#demo-4">Demo</a></h3>
+<p>In this demo (inspired by Michael Kerrisk’s <a href="https://man7.org/conf/ndctechtown2021/cgroups-v2-part-1-intro-NDC-TechTown-2021-Kerrisk.pdf">tech talk</a>), we will create a cgroup and set <code>pids.max</code> to 5 and confirm that the process can only run 5 tasks at max.</p>
+<pre><code class="language-bash">sudo bash
+cd /sys/fs/cgroup/
+# we create a cgroup called foo
+mkdir foo
+
+# add the current process to the created cgroup
+echo $$ &gt; foo/cgroup.procs
+
+# confirm that the current process belongs to the foo cgroup
+cat /proc/$$/cgroup
+# 0::/foo
+
+# set the maximum number of tasks at once
+echo 5 &gt; /sys/fs/cgroup/foo/pids.max
+
+for i in {1..5}; do sleep 1 &amp; done
+# [1] 8379
+# [2] 8380
+# [3] 8381
+# [4] 8382
+# bash: fork: retry: Resource temporarily unavailable
+</code></pre>
+<p>After creating a new <code>cgroup</code> called <code>foo</code> and adding the process into that cgroup, we set <code>pids.max</code> to <code>5</code>. Next, we execute <code>for i in {1..5}; do sleep 1 &amp; done</code> and see that when the process tries to run the 5th <code>sleep 1</code>, it errors out as the process cannot create 5 processes.</p>
+<h3 id="implementation-4"><a class="header" href="#implementation-4">Implementation</a></h3>
+<p>There are many resources that we can choose to limit. For my toy container implementation, I will only limit the <code>memory</code> and <code>max_pids</code>. In the implementation, we will use the <a href="https://crates.io/crates/cgroups-rs">cgroup-rs</a> crate, a Rust library for managing cgroups.</p>
+<p>Note that limiting the resources is performed by the parent process after the child process is created. This is because we need the child process’s <code>pid</code> so that we can add it to the <code>cgroup</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn run() -&gt; ContainerResult {
+    ...
+    let child_pid = create_child_process(&amp;config)?;
+    resources(&amp;config, child_pid)?;
+    ...
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The code for limiting resources is simple. We create a new <code>cgroup</code> with the <code>config.hostname</code> as its name. We then write to the corresponding resource’s file before adding the <code>pid</code> to the created <code>cgroup</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn resources(config: &amp;ChildConfig, pid: Pid) -&gt; ContainerResult {
+    println!(&quot;Restricting resource!&quot;);
+    let mut cg_builder = CgroupBuilder::new(&amp;config.hostname);
+    if let Some(memory_limit) = config.memory {
+        println!(&quot;Setting memory limit to: {:?}&quot;, memory_limit);
+
+        cg_builder = cg_builder.memory().memory_hard_limit(memory_limit).done();
+    }
+    if let Some(max_pids) = config.max_pids {
+        cg_builder = cg_builder
+            .pid()
+            .maximum_number_of_processes(cgroups_rs::MaxValue::Value(max_pids))
+            .done();
+    }
+
+    let cg = cg_builder.build(Box::new(V2::new()));
+
+    let pid: u64 = pid.as_raw() as u64;
+
+    if let Err(e) = cg.add_task(CgroupPid::from(pid)) {
+        println!(&quot;Failed to add task to cgroup. Error: {:?}&quot;, e);
+        return Err(ContainerError::CgroupPidErr);
+    };
+
+    Ok(())
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-the-implementation-4"><a class="header" href="#testing-the-implementation-4">Testing the Implementation</a></h3>
+<p>This is the code snippet we will use to test whether limiting the number of pids in a cgroup works. This is basically a Rust implementation of our demo earlier: <code>for i in {1..5}; do sleep 1 &amp; done</code>.</p>
+<pre><pre class="playground"><code class="language-rust">use std::thread;
+use std::time::Duration;
+
+fn main() {
+    for i in 1..=5 {
+        thread::spawn(move || {
+            println!(&quot;Thread {} started&quot;, i);
+            thread::sleep(Duration::from_secs(1));
+            println!(&quot;Thread {} completed&quot;, i);
+        });
+    }
+
+    // Sleep for a while to allow threads to finish.
+    thread::sleep(Duration::from_secs(2));
+}</code></pre></pre>
+<p>When we run the executable, we get a <code>Resource temporarily unavailable</code> message. If we examine the hostname and check <code>/sys/fs/cgroup/mini-JoYUGNc/pids.max</code>, we can see that it’s <code>5</code>. We can also check which <code>cgroup</code> the child process is to verify that it’s added to the <code>cgroup</code> correctly.</p>
+<pre><code class="language-bash">sudo target/debug/mini-container /sleep_test /home/brianshih/alpine 
+		--nproc 5
+# thread 'main' panicked at 'failed to spawn thread: Os 
+# { code: 11, kind: WouldBlock, message: &quot;Resource temporarily unavailable&quot; }
+
+hostname
+# hostname of child process: mini-JoYUGNc
+
+# host system
+cat /sys/fs/cgroup/mini-JoYUGNc/pids.max
+# 5
+
+# pid of child process is 8428
+cat /proc/8428/cgroup
+# 0::/mini-OhMDCDW
+</code></pre>
+<p>Next, we run the same command without the <code>--nproc 5</code> option:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>sudo target/debug/mini-container /sleep_test /home/brianshih/alpine 
+<span class="boring">}</span></code></pre></pre>
+<p>This time, it ran successfully, confirming that our cgroup implementation worked.</p>
+<h3 id="additional-resources-4"><a class="header" href="#additional-resources-4">Additional Resources</a></h3>
+<p><a href="https://www.nginx.com/blog/what-are-namespaces-cgroups-how-do-they-work/">Blog: What are Namespaces and cgroups?</a></p>
+<p><a href="https://faun.pub/kubernetes-story-linux-namespaces-and-cgroups-what-are-containers-made-from-d544ac9bd622">Blog: Deep into Containers (Namespace &amp; CGroups)</a></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="future-work"><a class="header" href="#future-work">Future Work</a></h1>
+<p>There are a lot of container features I would love to explore in the future, such as:</p>
+<ul>
+<li><strong>networking</strong>: I would love to learn how systems like Docker enable containers to communicate with each other and outside the world.</li>
+<li><strong>image layers</strong>: I would love to learn how Docker images work under the hood and how the Docker engine's cache ensures the efficient creation of Docker images.</li>
+<li><strong>hacking a container</strong>: I would love to learn how to attack a container to understand container guarantees better.</li>
+</ul>
 
                     </main>
 
