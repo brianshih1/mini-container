@@ -6,9 +6,7 @@ We want to granularly control and limit the privileges of processes within a con
 
 ### Theory
 
-Traditionally, processes run with either a full set of privileges granted by the root user or with a limited set of privileges granted by the process’s user and groups.
-
-However, sometimes a program needs to be run by an unprivileged user but be able to make privileged calls. In that case, the [suid bit](https://www.redhat.com/sysadmin/suid-sgid-sticky-bit) would be set on the file, which will cause the file to be executed by the user who owns the file. This makes the program susceptible to privilege escalation attacks.
+Traditionally, processes run with either a full set of privileges granted by the root user or with a limited set of privileges granted by the process’s user and groups. However, sometimes a program needs to be run by an unprivileged user but make privileged calls. One way to allow that is to set the [suid bit](https://www.redhat.com/sysadmin/suid-sgid-sticky-bit) on the file, which will cause the file to be executed by the user who owns the file. This makes the program susceptible to privilege escalation attacks.
 
 Linux Capabilities are introduced as a mechanism that allows a process to perform privileged operations without being granted superuser access. Rather than a single privilege, the superuser privilege is divided into distinct units known as capabilities.
 
@@ -34,9 +32,9 @@ If a user wants to execute a file that needs capability `X`, the user needs X to
 
 **Demo 1: Gaining Capabilities from Executables**
 
-One of the Linux Capabilities is `CAP_NET_BIND_SERVICE`, which determines whether a process can bind a socket to a Internet domain privileged ports (port number less than 1024).
+One of the Linux Capabilities is `CAP_NET_BIND_SERVICE`, which determines whether a process can bind a socket to an Internet domain privileged port (port number less than 1024).
 
-To start off, I’ve created a Rust project with the following code. All this code snippet does is that it tries to create a `TcpListener` and bind it to a privileged address (80).
+To start, I’ve created a Rust project with the following code. All this code snippet does is that it tries to create a `TcpListener` and bind it to a privileged address (80).
 
 ```rust
 use std::net::TcpListener;
@@ -63,6 +61,8 @@ grep Cap /proc/$$/status
 # CapEff:	0000000000000000
 # CapBnd:	000001ffffffffff
 # CapAmb:	0000000000000000
+capsh --decode=000001ffffffffff
+# 0x000001ffffffffff=...cap_net_bind_service,cap_net_broadcast...
 ```
 
 Now, let’s think about how we can grant capability to the process running the file.
@@ -110,9 +110,9 @@ Let’s look at this equation again:
 P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
 ```
 
-If we don’t set the `F(effective)` bit, then we need to ensure that `P'(ambient)` contains the capability bit. To do that, we need to create a capability-aware file.  Capability aware files can use the [prctl](https://man7.org/linux/man-pages/man2/prctl.2.html) calls to add capabilities to capability sets.
+If we don’t set the `F(effective)` bit, then we need to ensure that `P'(ambient)` contains the capability bit. To do that, we need to create a capability-aware file.  Capability-aware files can use the [prctl](https://man7.org/linux/man-pages/man2/prctl.2.html) calls to add capabilities to capability sets.
 
-For example, `prctl` with arguments of `PR_CAP_AMBIENT` `PR_CAP_AMBIENT_RAISE` can add capabilities to the ambient set. According to prctl’s Linux doc, `PR_CAP_AMBIENT_RAISE` adds the capability specified in arg3 to the ambient set and “the specified capability must already be present in both the permitted and the inheritable sets of the process”.
+For example, `prctl` with arguments of `PR_CAP_AMBIENT` `PR_CAP_AMBIENT_RAISE` can add capabilities to the ambient set. According to prctl’s Linux doc, `PR_CAP_AMBIENT_RAISE` adds the capability specified in arg3 to the ambient set, and “the specified capability must already be present in both the permitted and the inheritable sets of the process”.
 
 As a result, we need to add the capability to the inheritable set of the thread before adding it to the ambient set of the thread. We will add the capability to `F(permitted)` manually since I can’t seem to add it with `prctl` directly (I’m still going through the docs to find out why this is happening!).
 
@@ -154,7 +154,7 @@ We use the [caps crate](https://crates.io/crates/caps) to set the capabilities. 
 
 As specified earlier, the capability must be present in both the permitted and the inheritable sets of the process. Therefore, we use `sudo setcap` to add the capability to the permitted set of the file.
 
-After setting the capability bit for `NET_BIND_SERVICE` to the permission capability set of the file, let’s run `/bin/bash` with the `set-ambient` program. We can check the capability sets of the process via `grep Cap /proc/$$/status` and see that the effective bits for the process is `0000000000000400`. Finally, we can use `capsh --decode` to confirm that `cap_net_bind_service` is in the process’s effective set.
+After setting the capability bit for `NET_BIND_SERVICE` to the permission capability set of the file, let’s run `/bin/bash` with the `set-ambient` program. We can check the capability sets of the process via `grep Cap /proc/$$/status` and see that the effective bits for the process are `0000000000000400`. Finally, we can use `capsh --decode` to confirm that `cap_net_bind_service` is in the process’s effective set.
 
 ```bash
 sudo setcap cap_net_bind_service+p target/debug/set-ambient
@@ -181,7 +181,7 @@ target/debug/set-ambient ../tcp_example/target/debug/tcp_example
 
 My implementation takes in a list of capabilities to add and a list of capabilities to drop. If `ALL` is specified in `cap-drop`, then all capabilities are dropped.
 
-```rust
+```bash
 sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
 	--cap-drop ALL 
 	--cap-add NET_BIND_SERVICE CAP_SETUID
@@ -189,7 +189,7 @@ sudo target/debug/mini-container /bin/ash /home/brianshih/alpine
 
 Here is the pseudocode for the implementation:
 
-- for each capabilities to drop, drop them. If the capability specified is `ALL`, then loop through any capabilities in the bounding set unless it’s inside the capabilities to add
+- for each capability to drop, drop them. If the capability specified is `ALL`, then loop through any capabilities in the bounding set unless it’s inside the capabilities to add
 - loop through the capabilities to add and add the capability set to the inheritable set and the ambient set.
 
 Here is the actual code:
@@ -286,7 +286,7 @@ capsh --decode=0000000000000400
 # 0x0000000000000400=cap_net_bind_service
 ```
 
-Next, I built a Rust program with this code. All it does is that it prints out the capability sets of the process and runs `setresuid`, which is granted if the `SETUID` capability is set.
+Next, I built a Rust program with this code. All it does is print out the capability sets of the process and run `setresuid`, which is granted if the `SETUID` capability is set.
 
 ```rust
 use nix::unistd::{setresuid, Uid};

@@ -28,7 +28,7 @@ Each filter in the seccomp filter returns an action, that can be one of:
 - SCMP_ACT_TRACE: notify the tracer
 - SCMP_ACT_LOG: logged
 - SCMP_ACT_ALLOW: allowed
-- SCMP_ACT_NOTIFY: monitoring process will be notified
+- SCMP_ACT_NOTIFY: notify the monitoring process
 
 In short, Seccomp allows us to set rules that determine what happens when certain system calls are invoked. Seccomp is a powerful tool. But knowing which system calls to filter out is the tricky part. In this blog, I will focus only on the mechanism of filtering system calls and not discuss which system calls are dangerous. For an explanation of that, I suggest [Lizzie’s blog](https://blog.lizzie.io/linux-containers-in-500-loc.html#org8504d16) or [Docker’s documentation](https://github.com/docker/docs/blob/1253f14f6dd83df2cf9965182de118e5886c1b9e/content/engine/security/seccomp.md).
 
@@ -85,8 +85,6 @@ const DISABLED_SYSCALLS: [Syscall; 9] = [
 ];
 
 fn syscalls() -> ContainerResult {
-    println!("Disabling syscalls!");
-
     let s_isuid: u64 = Mode::S_ISUID.bits().into();
     let s_isgid: u64 = Mode::S_ISGID.bits().into();
     let clone_newuser = CloneFlags::CLONE_NEWUSER.bits() as u64;
@@ -106,7 +104,6 @@ fn syscalls() -> ContainerResult {
         Ok(mut ctx) => {
             for syscall in DISABLED_SYSCALLS {
                 if let Err(err) = ctx.set_action_for_syscall(Action::Errno(0), syscall) {
-                    println!("Failed to disable syscall: {:?}. Error: {:?}", syscall, err);
                     return Err(ContainerError::DisableSyscall);
                 };
             }
@@ -117,23 +114,18 @@ fn syscalls() -> ContainerResult {
                     syscall,
                     &[Comparator::new(arg_idx, Cmp::MaskedEq, bit, Some(bit))],
                 ) {
-                    println!("Failed to disable syscall: {:?}. Error: {:?}", syscall, err);
                     return Err(ContainerError::DisableSyscall);
                 }
             }
 
             if let Err(err) = ctx.load() {
-                println!("Failed to load syscall disabling: {:?}", err);
                 return Err(ContainerError::DisableSyscall);
             };
         }
         Err(err) => {
-            println!("Failed to open seccomp context: {:?}", err);
             return Err(ContainerError::DisableSyscall);
         }
     }
-
-    println!("Finished disabling syscalls!");
     Ok(())
 }
 ```
@@ -165,7 +157,7 @@ Now, let’s test whether our implementation works. In this test, we will confir
 
 First, let’s confirm that `unshare` works when there are no flags set. Here is the `unshare_test` program:
 
-```docker
+```rust
 use nix::sched::{unshare, CloneFlags};
 
 fn main() {
@@ -178,7 +170,7 @@ fn main() {
 
 After compiling the binary for `unshare_test`, we need to copy the executable into the `alpine` directory before running the program in the container.
 
-```docker
+```bash
 # inside the unshare_test repo
 RUSTFLAGS="-C target-feature=+crt-static" cargo build --target="aarch64-unknown-linux-gnu"
 cp target/aarch64-unknown-linux-gnu/debug/unshare_test /home/brianshih/alpine
@@ -192,7 +184,7 @@ Based on the output of running the executable in the container environment, we�
 
 Now, let’s see what will happen if performing `unshare` with the `CLONE_NEWUSER` flag works with the following code:
 
-```docker
+```rust
 use nix::sched::{unshare, CloneFlags};
 
 fn main() {
@@ -205,7 +197,7 @@ fn main() {
 
 After compiling and copying the executable to the target root filesystem, I ran the executable in the container environment:
 
-```docker
+```bash
 sudo target/debug/mini-container /unshare_test /home/brianshih/alpine
 # Error: UnknownErrno
 ```

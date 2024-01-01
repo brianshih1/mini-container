@@ -31,9 +31,9 @@ The new root filesystem comes from the `ubuntu` image. A docker image is an exec
 
 ### Pid Isolation
 
-Processes in a container has an isolated view of other processes running on the host. In the example below, if we perform `ps -a -u` to list all processes in the container, we only see the process running `bash` and `ps -a -u`. However, if we perform `ps -a -u`, we see a lot more processes.
+Processes in a container have an isolated view of other processes running on the host. In the example below, if we perform `ps -a -u` to list all processes in the container, we only see the process running `bash` and `ps -a -u`. However, if we perform `ps -a -u` on the host system, we see a lot more processes.
 
-Furthermore, in the example below the process perceives its `pid` as `1`. However, from the perspective of the host system the process running `bash` is `6098`.
+Furthermore, in the example below the process perceives its `pid` as `1`. However, from the perspective of the host system, the process running `bash` is `6098`.
 
 ```bash
 docker run -it ubuntu bash
@@ -53,9 +53,9 @@ root       6098  0.0  0.0   4136  3200 pts/0    Ss+  15:19   0:00 bash
 
 ### User ID Isolation
 
-In a container, things like the user ID and group ID are isolated. What this unlocks is that a process can run as a root user inside the container while actually being an unprivileged user on the host.
+Processes in a container have an isolated view of things like user IDs and group IDs. This enables a process to run as different users inside and outside the container.
 
-In the example below, we enable the `user namespace` via `--userns-remap=default`. The process in the container perceives its `uid` as 0. But if we look at the user corresponding to the process from the host system, the user is in fact `165536`.
+In the example below, we enable the `user namespace` via `--userns-remap=default`. The process in the container perceives its `uid` as 0. But if we look at the user corresponding to the process from the host system, the user is `165536`.
 
 ```bash
 sudo dockerd --userns-remap=default
@@ -72,7 +72,7 @@ ps -a -u
 
 ### Resource Restriction
 
-In Docker, you can constrain resources on the container. For example, you can limit the amount of memory the process can take, the number of CPUs the container can run on, etc. Check out [Docker’s doc](https://docs.docker.com/engine/reference/run/#runtime-constraints-on-resources) for the full list of resources that can be constrained.
+In Docker, you can constrain resources that the container can access. For example, you can limit the amount of memory the process can take, the number of CPUs the container can run on, etc. Check out [Docker’s doc](https://docs.docker.com/engine/reference/run/#runtime-constraints-on-resources) for the full list of resources that can be constrained.
 
 As an example, here is how you can limit the container to have a memory limit of 128 mb.
 
@@ -82,7 +82,7 @@ docker run -it --memory 128m ubuntu bash
 
 ## Secret behind Containers
 
-So how does a container provide the isolation properties demonstrated above? It boils down to the following Linux primitives:
+The secret behind how a container can provide the isolation properties demonstrated above boils down to the following Linux primitives:
 
 - Namespaces
 - Capabilities

@@ -1,8 +1,8 @@
 # API
 
-Before we talk about the theory of and implementation behind containers, let’s first look at what we plan to build in this project. Don’t worry if some of these terminologies or terms are confusing, I will try to explain them all in this blog.
+Before we talk about the theory of and implementation behind containers, let’s first look at the API for my toy container.
 
-At the core, the `mini-container` program takes two arguments: an executable program and a directory that points to a root filesystem. It creates a process, sets up the container environment, and executes the executable program in this container.
+At the core, the `mini-container` program takes two arguments: an executable program and a directory that points to a root filesystem. It creates a process, sets up the container environment for the process, and executes the executable program in this container.
 
 Here are the arguments and options to execute my toy container.
 
@@ -78,7 +78,7 @@ docker run --memory="1048m" --ulimit nproc=5 IMAGE
 
 ### **Dropping and Adding Linux Capabilities**
 
-Here is how you can drop all the Linux capabilities then adding the `NET_BIND_SERVICE` capability. Note that for my toy implementation, I only support 3 capabilities (so far). It’s extremely trivial to add them but my goal isn’t to build a production level container so I stopped whenever I felt like I understand how they work.
+Here is how you can drop all the Linux capabilities and add the `NET_BIND_SERVICE` capability. Note that for my toy implementation, I only support 3 capabilities (so far). It’s extremely trivial to add them but my goal isn’t to build a production-level container so I stopped whenever I felt like I understood how they work.
 
 ```bash
 sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 

@@ -64,7 +64,7 @@ fn run() -> ContainerResult {
 
 ### Create the child process
 
-Since a container is just a process, we need to create the child process for the container. The function to create the child process is `create_child_process`.
+Since a container is just a process, we need to create the child process for the container. The `create_child_process` function is responsible for that.
 
 ```rust
 fn run() -> ContainerResult {
@@ -73,14 +73,13 @@ fn run() -> ContainerResult {
 	  ...
     let child_pid = create_child_process(&config)?;
     if let Err(e) = waitpid(child_pid, None) {
-        println!("Error waiting for pid: {:?}", e);
         return Err(ContainerError::WaitPid);
     };
     Ok(())
 }
 ```
 
-After creating the child process, we don’t want the parent process to terminate until the child process completes. Therefore, we use the [waitpid](https://linux.die.net/man/2/waitpid) call to wait until the child process finishes.
+After creating the child process, we need to make sure the parent process doesn't terminate until the child process completes. We use the [waitpid](https://linux.die.net/man/2/waitpid) call to make sure of that.
 
 Here is the implementation for `create_child_process`:
 

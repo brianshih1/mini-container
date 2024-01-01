@@ -2,17 +2,19 @@
 
 ### Goal
 
-The best way to prevent privilege-escalation attacks from within a container is to run the container’s executable as an unprivileged user. However, some applications require the process to run as a `root` user. Therefore, our goal is to set up an environment such that the user within the container is privileged but unprivileged to the host system.
+The best way to prevent privilege-escalation attacks from within a container is to run the container’s executable as an unprivileged user. However, some applications require the process to run as a `root` user. Therefore, our goal is to set up an environment such that the user is privileged within the container but unprivileged to the host system.
 
 ### Theory
 
 User Namespaces isolate security-related identifiers. According to [Linux’s doc](https://man7.org/linux/man-pages/man7/user_namespaces.7.html), “a process’s user and group IDs can be different inside and outside a namespace. In particular, a process can have a normal unprivileged user ID outside a user namespace while at the same time having a user ID of 0 inside the namespace”.
 
-Furthermore, user namespaces are nested. Apart from the root namespace, each namespace has a parent namespace, which is the user namespace of the process that created the user namespace via a call to `unshare` or `clone` with the `CLONE_NEWUSER` flag.
-
 The user namespace is what enables a container to run as a `root` user within a container but have unprivileged access outside the container, which prevents privilege-escalation attacks.
 
+An important property of user namespaces is that it is nested. Apart from the root namespace, each namespace has a parent namespace, which is the user namespace of the process that created the user namespace via a call to `unshare` or `clone` with the `CLONE_NEWUSER` flag.
+
 **User mappings**
+
+User mappings are what allow a process's user IDs to be different inside and outside a namespace.
 
 When a user namespace is created, it starts without a mapping of User IDs to the parent user namespace. The `/proc/pid/uid_map`, which resides in the parent user namespace, maps the User IDs inside the parent user namespace to the User IDs inside the child user namespace.
 
@@ -22,7 +24,7 @@ Each line in the `uid_map` takes the form:
 ID-in-child-ns   ID-in-parent-ns   length
 ```
 
-`ID-in-child-ns`,  `ID-in-parent-ns`, and `length` specifies that a range of user IDs of `length` starting from `ID-in-child-ns` are mapped to a range of user IDs of `length` in the parent user namespace starting with `ID-in-parent-ns`.
+`ID-in-child-ns`,  `ID-in-parent-ns`, and `length` specify that a range of user IDs of `length` starting from `ID-in-child-ns` are mapped to a range of user IDs of `length` in the parent user namespace starting with `ID-in-parent-ns`.
 
 For example, a line of `0 1000 1` means that the user with `User ID 0` in the child user namespace maps to the user with `User ID 1000`.
 

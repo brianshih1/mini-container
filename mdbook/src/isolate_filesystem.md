@@ -139,7 +139,7 @@ We first download the alpine image and extract the alpine image into a newly cre
 
 Next, we need to create the `put_old` directory for `pivot_root` under the `alpine` directory, which is `alpine/oldrootfs`. Finally, we use `pivot_root` to swap out the root filesystem.
 
-If we navigate to the root directory via `cd /` and vverifythat the root directory is indeed the Alpine filesystem (as it contains `I_AM_ALPINE.txt`). However, we can still see the `old_root` directory which points to the original root filesystem. Therefore, we need to unmount it and remove the directory to be isolated from the original filesystem of the host.
+If we navigate to the root directory via `cd /` and verify that the root directory is indeed the Alpine filesystem (as it contains `I_AM_ALPINE.txt`). However, we can still see the `old_root` directory which points to the original root filesystem. Therefore, we need to unmount it and remove the directory to be isolated from the original filesystem of the host.
 
 We can also verify the mount points in the host system as follows:
 
@@ -180,7 +180,6 @@ fn mount_filesystem(
     ) {
         Ok(_) => Ok(()),
         Err(err) => {
-            println!("Failed to mount directory. Error: {:?}", err);
             return Err(ContainerError::MountSysCall);
         }
     }
