@@ -6,20 +6,18 @@ use std::{
     io::Write,
     os::fd::AsRawFd,
     path::PathBuf,
-    process::Child,
 };
 
 use caps::Capability;
 use cgroups_rs::{
     cgroup_builder::CgroupBuilder,
     hierarchies::V2,
-    memory::{MemController, SetMemory},
-    CgroupPid, MaxValue,
+    CgroupPid,
 };
-use clap::{Parser, Subcommand};
+use clap::{Parser};
 use errors::{ContainerError, ContainerResult};
-use libc::TIOCSTI;
-use nix::unistd::{gettid, setgroups, setresgid, Gid};
+
+
 use nix::{
     mount::{mount, umount2, MntFlags, MsFlags},
     sched::unshare,
@@ -37,7 +35,7 @@ use nix::{
 };
 
 use phf::phf_map;
-use rand::{distributions::Alphanumeric, seq::SliceRandom, Rng};
+use rand::{distributions::Alphanumeric, Rng};
 use std::process::exit;
 use syscallz::{Action, Cmp, Comparator, Context, Syscall};
 
@@ -441,7 +439,7 @@ fn handle_child_uid_map(pid: Pid, fd: i32, user_id: Option<u32>) -> ContainerRes
     // Wait for the user to create a user namespace
     socket_recv(fd)?;
 
-    let user_id = match user_id {
+    let _user_id = match user_id {
         Some(id) => id,
         None => 0, // default to run as root if no user ID is provided
     };
