@@ -247,7 +247,7 @@ rmdir old_root/
 </code></pre>
 <p>We first download the alpine image and extract the alpine image into a newly created <code>alpine</code> directory that will serve as the <code>new_root</code> in <code>pivot_root</code>. Next, we create a mount point from the <code>alpine</code> directory.</p>
 <p>Next, we need to create the <code>put_old</code> directory for <code>pivot_root</code> under the <code>alpine</code> directory, which is <code>alpine/oldrootfs</code>. Finally, we use <code>pivot_root</code> to swap out the root filesystem.</p>
-<p>If we navigate to the root directory via <code>cd /</code> and vverifythat the root directory is indeed the Alpine filesystem (as it contains <code>I_AM_ALPINE.txt</code>). However, we can still see the <code>old_root</code> directory which points to the original root filesystem. Therefore, we need to unmount it and remove the directory to be isolated from the original filesystem of the host.</p>
+<p>If we navigate to the root directory via <code>cd /</code> and verify that the root directory is indeed the Alpine filesystem (as it contains <code>I_AM_ALPINE.txt</code>). However, we can still see the <code>old_root</code> directory which points to the original root filesystem. Therefore, we need to unmount it and remove the directory to be isolated from the original filesystem of the host.</p>
 <p>We can also verify the mount points in the host system as follows:</p>
 <pre><code class="language-bash"># host system. 10920 is the pid of the process with the isolated filesystem
 cat /proc/10920/mounts
@@ -281,7 +281,6 @@ fn mount_filesystem(
     ) {
         Ok(_) =&gt; Ok(()),
         Err(err) =&gt; {
-            println!(&quot;Failed to mount directory. Error: {:?}&quot;, err);
             return Err(ContainerError::MountSysCall);
         }
     }

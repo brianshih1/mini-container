@@ -200,7 +200,7 @@ fn run() -&gt; ContainerResult {
 	  ...
 }</code></pre></pre>
 <h3 id="create-the-child-process"><a class="header" href="#create-the-child-process">Create the child process</a></h3>
-<p>Since a container is just a process, we need to create the child process for the container. The function to create the child process is <code>create_child_process</code>.</p>
+<p>Since a container is just a process, we need to create the child process for the container. The <code>create_child_process</code> function is responsible for that.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>fn run() -&gt; ContainerResult {
@@ -209,13 +209,12 @@ fn run() -&gt; ContainerResult {
 	  ...
     let child_pid = create_child_process(&amp;config)?;
     if let Err(e) = waitpid(child_pid, None) {
-        println!(&quot;Error waiting for pid: {:?}&quot;, e);
         return Err(ContainerError::WaitPid);
     };
     Ok(())
 }
 <span class="boring">}</span></code></pre></pre>
-<p>After creating the child process, we don’t want the parent process to terminate until the child process completes. Therefore, we use the <a href="https://linux.die.net/man/2/waitpid">waitpid</a> call to wait until the child process finishes.</p>
+<p>After creating the child process, we need to make sure the parent process doesn't terminate until the child process completes. We use the <a href="https://linux.die.net/man/2/waitpid">waitpid</a> call to make sure of that.</p>
 <p>Here is the implementation for <code>create_child_process</code>:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {

@@ -146,8 +146,7 @@
 <h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
 <p>We want to granularly control and limit the privileges of processes within a container.</p>
 <h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
-<p>Traditionally, processes run with either a full set of privileges granted by the root user or with a limited set of privileges granted by the process’s user and groups.</p>
-<p>However, sometimes a program needs to be run by an unprivileged user but be able to make privileged calls. In that case, the <a href="https://www.redhat.com/sysadmin/suid-sgid-sticky-bit">suid bit</a> would be set on the file, which will cause the file to be executed by the user who owns the file. This makes the program susceptible to privilege escalation attacks.</p>
+<p>Traditionally, processes run with either a full set of privileges granted by the root user or with a limited set of privileges granted by the process’s user and groups. However, sometimes a program needs to be run by an unprivileged user but make privileged calls. One way to allow that is to set the <a href="https://www.redhat.com/sysadmin/suid-sgid-sticky-bit">suid bit</a> on the file, which will cause the file to be executed by the user who owns the file. This makes the program susceptible to privilege escalation attacks.</p>
 <p>Linux Capabilities are introduced as a mechanism that allows a process to perform privileged operations without being granted superuser access. Rather than a single privilege, the superuser privilege is divided into distinct units known as capabilities.</p>
 <p><strong>Rules of Capabilities</strong></p>
 <p>In Linux, both processes and files (executables) can have capabilities. So what capabilities are granted when a file is executed by a process? For that, we need to first introduce the concept of capabilities set.</p>
@@ -164,8 +163,8 @@
 <p>If a user wants to execute a file that needs capability <code>X</code>, the user needs X to be inside <code>P'(effective)</code>. In the 2 demos below, we will demonstrate how we can achieve that for different types of files.</p>
 <h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
 <p><strong>Demo 1: Gaining Capabilities from Executables</strong></p>
-<p>One of the Linux Capabilities is <code>CAP_NET_BIND_SERVICE</code>, which determines whether a process can bind a socket to a Internet domain privileged ports (port number less than 1024).</p>
-<p>To start off, I’ve created a Rust project with the following code. All this code snippet does is that it tries to create a <code>TcpListener</code> and bind it to a privileged address (80).</p>
+<p>One of the Linux Capabilities is <code>CAP_NET_BIND_SERVICE</code>, which determines whether a process can bind a socket to an Internet domain privileged port (port number less than 1024).</p>
+<p>To start, I’ve created a Rust project with the following code. All this code snippet does is that it tries to create a <code>TcpListener</code> and bind it to a privileged address (80).</p>
 <pre><pre class="playground"><code class="language-rust">use std::net::TcpListener;
 
 fn main() {
@@ -185,6 +184,8 @@ fn main() {
 # CapEff:	0000000000000000
 # CapBnd:	000001ffffffffff
 # CapAmb:	0000000000000000
+capsh --decode=000001ffffffffff
+# 0x000001ffffffffff=...cap_net_bind_service,cap_net_broadcast...
 </code></pre>
 <p>Now, let’s think about how we can grant capability to the process running the file.</p>
 <p>Firstly, the file is clearly not capability-aware. Capability aware programs are programs that understand and manipulate capabilities through calls to <a href="https://man7.org/linux/man-pages/man3/libcap.3.html">libcap</a> syscalls.</p>
@@ -211,8 +212,8 @@ target/debug/hello_world
 <p>Let’s look at this equation again:</p>
 <pre><code>P'(effective) = F(effective) ? P'(permitted) : P'(ambient)
 </code></pre>
-<p>If we don’t set the <code>F(effective)</code> bit, then we need to ensure that <code>P'(ambient)</code> contains the capability bit. To do that, we need to create a capability-aware file.  Capability aware files can use the <a href="https://man7.org/linux/man-pages/man2/prctl.2.html">prctl</a> calls to add capabilities to capability sets.</p>
-<p>For example, <code>prctl</code> with arguments of <code>PR_CAP_AMBIENT</code> <code>PR_CAP_AMBIENT_RAISE</code> can add capabilities to the ambient set. According to prctl’s Linux doc, <code>PR_CAP_AMBIENT_RAISE</code> adds the capability specified in arg3 to the ambient set and “the specified capability must already be present in both the permitted and the inheritable sets of the process”.</p>
+<p>If we don’t set the <code>F(effective)</code> bit, then we need to ensure that <code>P'(ambient)</code> contains the capability bit. To do that, we need to create a capability-aware file.  Capability-aware files can use the <a href="https://man7.org/linux/man-pages/man2/prctl.2.html">prctl</a> calls to add capabilities to capability sets.</p>
+<p>For example, <code>prctl</code> with arguments of <code>PR_CAP_AMBIENT</code> <code>PR_CAP_AMBIENT_RAISE</code> can add capabilities to the ambient set. According to prctl’s Linux doc, <code>PR_CAP_AMBIENT_RAISE</code> adds the capability specified in arg3 to the ambient set, and “the specified capability must already be present in both the permitted and the inheritable sets of the process”.</p>
 <p>As a result, we need to add the capability to the inheritable set of the thread before adding it to the ambient set of the thread. We will add the capability to <code>F(permitted)</code> manually since I can’t seem to add it with <code>prctl</code> directly (I’m still going through the docs to find out why this is happening!).</p>
 <p>Here is the <code>set-ambient</code> program (inspired by this <a href="https://blog.container-solutions.com/linux-capabilities-in-practice">blog</a>) to do that:</p>
 <pre><pre class="playground"><code class="language-rust">use std::{env, ffi::CString};
@@ -246,7 +247,7 @@ fn main() {
 }</code></pre></pre>
 <p>We use the <a href="https://crates.io/crates/caps">caps crate</a> to set the capabilities. The call <code>caps::raise(None, Ambient, CAP_NET_BIND_SERVICE)</code> is a wrapper around the Linux call <code>prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, NET_BIND_SERVICE)</code>.</p>
 <p>As specified earlier, the capability must be present in both the permitted and the inheritable sets of the process. Therefore, we use <code>sudo setcap</code> to add the capability to the permitted set of the file.</p>
-<p>After setting the capability bit for <code>NET_BIND_SERVICE</code> to the permission capability set of the file, let’s run <code>/bin/bash</code> with the <code>set-ambient</code> program. We can check the capability sets of the process via <code>grep Cap /proc/$$/status</code> and see that the effective bits for the process is <code>0000000000000400</code>. Finally, we can use <code>capsh --decode</code> to confirm that <code>cap_net_bind_service</code> is in the process’s effective set.</p>
+<p>After setting the capability bit for <code>NET_BIND_SERVICE</code> to the permission capability set of the file, let’s run <code>/bin/bash</code> with the <code>set-ambient</code> program. We can check the capability sets of the process via <code>grep Cap /proc/$$/status</code> and see that the effective bits for the process are <code>0000000000000400</code>. Finally, we can use <code>capsh --decode</code> to confirm that <code>cap_net_bind_service</code> is in the process’s effective set.</p>
 <pre><code class="language-bash">sudo setcap cap_net_bind_service+p target/debug/set-ambient
 target/debug/set-ambient /bin/bash
 # CAP_NET_BIND_SERVICE is in ambient capabilities. Executing file.
@@ -265,15 +266,13 @@ capsh --decode=0000000000000400
 </code></pre>
 <h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
 <p>My implementation takes in a list of capabilities to add and a list of capabilities to drop. If <code>ALL</code> is specified in <code>cap-drop</code>, then all capabilities are dropped.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
+<pre><code class="language-bash">sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
 	--cap-drop ALL 
 	--cap-add NET_BIND_SERVICE CAP_SETUID
-<span class="boring">}</span></code></pre></pre>
+</code></pre>
 <p>Here is the pseudocode for the implementation:</p>
 <ul>
-<li>for each capabilities to drop, drop them. If the capability specified is <code>ALL</code>, then loop through any capabilities in the bounding set unless it’s inside the capabilities to add</li>
+<li>for each capability to drop, drop them. If the capability specified is <code>ALL</code>, then loop through any capabilities in the bounding set unless it’s inside the capabilities to add</li>
 <li>loop through the capabilities to add and add the capability set to the inheritable set and the ambient set.</li>
 </ul>
 <p>Here is the actual code:</p>
@@ -365,7 +364,7 @@ grep Cap /proc/6517/status
 capsh --decode=0000000000000400
 # 0x0000000000000400=cap_net_bind_service
 </code></pre>
-<p>Next, I built a Rust program with this code. All it does is that it prints out the capability sets of the process and runs <code>setresuid</code>, which is granted if the <code>SETUID</code> capability is set.</p>
+<p>Next, I built a Rust program with this code. All it does is print out the capability sets of the process and run <code>setresuid</code>, which is granted if the <code>SETUID</code> capability is set.</p>
 <pre><pre class="playground"><code class="language-rust">use nix::unistd::{setresuid, Uid};
 
 fn main() {

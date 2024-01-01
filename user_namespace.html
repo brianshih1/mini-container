@@ -144,19 +144,20 @@
                     <main>
                         <h1 id="user-namespace"><a class="header" href="#user-namespace">User Namespace</a></h1>
 <h3 id="goal"><a class="header" href="#goal">Goal</a></h3>
-<p>The best way to prevent privilege-escalation attacks from within a container is to run the container’s executable as an unprivileged user. However, some applications require the process to run as a <code>root</code> user. Therefore, our goal is to set up an environment such that the user within the container is privileged but unprivileged to the host system.</p>
+<p>The best way to prevent privilege-escalation attacks from within a container is to run the container’s executable as an unprivileged user. However, some applications require the process to run as a <code>root</code> user. Therefore, our goal is to set up an environment such that the user is privileged within the container but unprivileged to the host system.</p>
 <h3 id="theory"><a class="header" href="#theory">Theory</a></h3>
 <p>User Namespaces isolate security-related identifiers. According to <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html">Linux’s doc</a>, “a process’s user and group IDs can be different inside and outside a namespace. In particular, a process can have a normal unprivileged user ID outside a user namespace while at the same time having a user ID of 0 inside the namespace”.</p>
-<p>Furthermore, user namespaces are nested. Apart from the root namespace, each namespace has a parent namespace, which is the user namespace of the process that created the user namespace via a call to <code>unshare</code> or <code>clone</code> with the <code>CLONE_NEWUSER</code> flag.</p>
 <p>The user namespace is what enables a container to run as a <code>root</code> user within a container but have unprivileged access outside the container, which prevents privilege-escalation attacks.</p>
+<p>An important property of user namespaces is that it is nested. Apart from the root namespace, each namespace has a parent namespace, which is the user namespace of the process that created the user namespace via a call to <code>unshare</code> or <code>clone</code> with the <code>CLONE_NEWUSER</code> flag.</p>
 <p><strong>User mappings</strong></p>
+<p>User mappings are what allow a process's user IDs to be different inside and outside a namespace.</p>
 <p>When a user namespace is created, it starts without a mapping of User IDs to the parent user namespace. The <code>/proc/pid/uid_map</code>, which resides in the parent user namespace, maps the User IDs inside the parent user namespace to the User IDs inside the child user namespace.</p>
 <p>Each line in the <code>uid_map</code> takes the form:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
 </span>ID-in-child-ns   ID-in-parent-ns   length
 <span class="boring">}</span></code></pre></pre>
-<p><code>ID-in-child-ns</code>,  <code>ID-in-parent-ns</code>, and <code>length</code> specifies that a range of user IDs of <code>length</code> starting from <code>ID-in-child-ns</code> are mapped to a range of user IDs of <code>length</code> in the parent user namespace starting with <code>ID-in-parent-ns</code>.</p>
+<p><code>ID-in-child-ns</code>,  <code>ID-in-parent-ns</code>, and <code>length</code> specify that a range of user IDs of <code>length</code> starting from <code>ID-in-child-ns</code> are mapped to a range of user IDs of <code>length</code> in the parent user namespace starting with <code>ID-in-parent-ns</code>.</p>
 <p>For example, a line of <code>0 1000 1</code> means that the user with <code>User ID 0</code> in the child user namespace maps to the user with <code>User ID 1000</code>.</p>
 <h3 id="demo"><a class="header" href="#demo">Demo</a></h3>
 <p>In the demo below, we first create a user namespace with the <code>-U</code> flag. According to the <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html">Linux doc</a>, an unmapped User ID is converted to the overflow user ID which is <code>65534</code>. This is why the <code>uid=65534</code>. However, when we check the <code>User ID</code> for the process via <code>ps -o 'pid uid user command' -a</code>, we can see that the UID is <code>1000</code>, the same User as the parent process’s user.</p>

@@ -143,8 +143,8 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="api"><a class="header" href="#api">API</a></h1>
-<p>Before we talk about the theory of and implementation behind containers, let’s first look at what we plan to build in this project. Don’t worry if some of these terminologies or terms are confusing, I will try to explain them all in this blog.</p>
-<p>At the core, the <code>mini-container</code> program takes two arguments: an executable program and a directory that points to a root filesystem. It creates a process, sets up the container environment, and executes the executable program in this container.</p>
+<p>Before we talk about the theory of and implementation behind containers, let’s first look at the API for my toy container.</p>
+<p>At the core, the <code>mini-container</code> program takes two arguments: an executable program and a directory that points to a root filesystem. It creates a process, sets up the container environment for the process, and executes the executable program in this container.</p>
 <p>Here are the arguments and options to execute my toy container.</p>
 <pre><code>mini-container [OPTIONS] &lt;PATH_TO_EXECUTABLE&gt; &lt;ROOT_FILESYSTEM_PATH&gt;
 </code></pre>
@@ -188,7 +188,7 @@ tar -xvf alpine-minirootfs-3.19.0-aarch64.tar.gz -C alpine
 <pre><code class="language-bash">docker run --memory=&quot;1048m&quot; --ulimit nproc=5 IMAGE
 </code></pre>
 <h3 id="dropping-and-adding-linux-capabilities"><a class="header" href="#dropping-and-adding-linux-capabilities"><strong>Dropping and Adding Linux Capabilities</strong></a></h3>
-<p>Here is how you can drop all the Linux capabilities then adding the <code>NET_BIND_SERVICE</code> capability. Note that for my toy implementation, I only support 3 capabilities (so far). It’s extremely trivial to add them but my goal isn’t to build a production level container so I stopped whenever I felt like I understand how they work.</p>
+<p>Here is how you can drop all the Linux capabilities and add the <code>NET_BIND_SERVICE</code> capability. Note that for my toy implementation, I only support 3 capabilities (so far). It’s extremely trivial to add them but my goal isn’t to build a production-level container so I stopped whenever I felt like I understood how they work.</p>
 <pre><code class="language-bash">sudo target/debug/mini-container /bin/ash /home/brianshih/alpine 
 	--cap-drop ALL 
 	--cap-add NET_BIND_SERVICE
