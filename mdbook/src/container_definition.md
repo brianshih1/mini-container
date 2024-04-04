@@ -13,18 +13,19 @@ Firstly, a process in a container has an isolated view of the filesystem. In the
 If we navigate to the root directory via `cd /`, we notice that the root filesystem of the process in a container is not the same one as the root filesystem on the host system. Modifying the root filesystem within the container will have no impact on the host system.
 
 ```bash
-docker run -it ubuntu bash
-cd /
-ls
-# bin  boot  dev  etc  home  lib  media  mnt  opt  proc
-#  root  run  sbin  srv  sys  tmp  usr  var
-
-# host system
-cd /
-ls
+host$ cd /
+host$ ls
 # bin    dev   lib         mnt   opt   run   srv       tmp
 # boot   etc   lost+found  proc  sbin  swapfile  usr
 # cdrom  home  media       root  snap  sys       var
+
+# going inside the ubuntu container we created
+host$ docker run -it ubuntu bash
+
+container$ cd /
+container$ ls
+# bin  boot  dev  etc  home  lib  media  mnt  opt  proc
+#  root  run  sbin  srv  sys  tmp  usr  var
 ```
 
 The new root filesystem comes from the `ubuntu` image. A docker image is an executable file. A docker image is made up of filesystems layered over each other. These layers form the base for a container’s root filesystem.
